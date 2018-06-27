@@ -30,15 +30,15 @@ def make_dataset(zf, class_to_idx, extensions):
 
 class ZipDatasetFolder(data.Dataset):
     def __init__(self, root, loader, extensions, transform=None,\
-            target_transform=None, data_cached=False, use_cache=None, pre_load=True):
+            target_transform=None, data_cached=False, use_cache=None,\
+            num_workers=0):
+        self.num_workers = num_workers
+        print('[LOG] preparing data folder')
         
-        if not loader:
-            loader = self.default_loader
+        self.loader = loader if loader else self.default_loader
         self.root = root
-        self.loader = loader
         self.extensions = extensions
         self.data_cached = data_cached
-
         if root[-4:] != '.zip':
             root += '.zip'
         self.zip = zipfile.ZipFile(root) 
@@ -53,22 +53,17 @@ class ZipDatasetFolder(data.Dataset):
                 with open(use_cache, 'wb') as f:
                     pickle.dump([classes, class_to_idx, samples], f)
                     
-        if pre_load:
-            self.cache = [[self.loader(x), y] for x, y in samples]\
-                    if data_cached else None
-        else:
-            self.cache = [None for i in range(len(samples))]\
-                    if data_cached else None
+        self.cache = [None for i in range(len(samples))]\
+                if data_cached else None
 
         assert len(samples) > 0
-
-
         self.classes = classes
         self.class_to_idx = class_to_idx
         self.samples = samples
 
         self.transform = transform
         self.target_transform = target_transform
+        print('[SUC] data folder')
 
     def __del__(self):
         self.zip.close()
@@ -115,9 +110,11 @@ class ZipDatasetFolder(data.Dataset):
         return fmt_str
 
     def default_loader(self, path):
-        with self.zip.open(path) as f:
-            img = Image.open(f)
-            return img.convert('RGB')
+        zf = zipfile.ZipFile(self.root)\
+                if self.num_workers > 1 else self.zip
+        with zf.open(path) as f:
+            img = Image.open(f).convert('RGB')
+        return img
 
 IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif']
 

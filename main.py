@@ -182,7 +182,7 @@ def main():
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize,
-        ]), data_cached=args.data_cached, pre_load=args.workers>1)
+        ]), data_cached=args.data_cached, num_workers=args.workers)
 
     if args.distributed:
         train_sampler = torch.utils.data.distributed.\
@@ -202,7 +202,7 @@ def main():
             transforms.CenterCrop(224),
             transforms.ToTensor(),
             normalize,
-        ]), data_cached=args.data_cached, pre_load=args.workers>1),
+        ]), data_cached=args.data_cached, num_workers=args.workers),
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
