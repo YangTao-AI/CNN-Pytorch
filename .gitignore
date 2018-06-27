@@ -1,0 +1,10 @@
+data
+*nori*
+*csv
+.DS_Store
+._*
+__pycache__
+.*swp
+train_log
+tmp
+
