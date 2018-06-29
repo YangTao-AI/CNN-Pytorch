@@ -15,11 +15,16 @@ import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
+import torchvision
 # }}}
+
+from networks.stn import Stn
+from IPython import embed
 
 from tensorboardX import SummaryWriter
 from my_folder import MyImageFolder
 
+stn_lr_rate = 1e-4
 #Params {{{
 '''
     Params
@@ -32,6 +37,13 @@ std = [0.23222743, 0.2277201, 0.26586822]
 # mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 USE_TORCHVISION = False
 # }}}
+
+
+torch_mean=torch.tensor(np.array(mean, dtype=np.float32).\
+        reshape(1, 3, 1, 1)).cuda()
+torch_std=torch.tensor(np.array(std, dtype=np.float32).\
+        reshape(1, 3, 1, 1)).cuda()
+
 if USE_TORCHVISION:# {{{
     import torchvision.models as models
     model_names = sorted(name for name in models.__dict__
@@ -56,10 +68,10 @@ parser.add_argument('--epochs', default=90, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
-parser.add_argument('--save-per-epoch', default=1, type=int)
+parser.add_argument('--save-per-epoch', default=5, type=int)
 parser.add_argument('-b', '--batch-size', default=32, type=int,
                     metavar='N', help='mini-batch size (default: 32)')
-parser.add_argument('--lr', '--learning-rate', default=0.1, type=float,
+parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
@@ -87,6 +99,10 @@ parser.add_argument('--data-cached', default=False, action='store_true')
 def main():
     global args, best_prec1, writer
     args = parser.parse_args()
+    if args.logdir == 'train_log':
+        args.logdir = '{},{},lr:{},wd:{}'.format(args.arch,
+                'pretrained' if args.pretrained else 'not-pretrained',
+                args.lr, args.weight_decay)
     args.__dict__['USE_TORCHVISION'] = USE_TORCHVISION
     args.__dict__['num_classes'] = num_classes
     args.__dict__['std'] = std
@@ -131,15 +147,40 @@ def main():
             num_classes=num_classes, pretrained=args.pretrained)\
             if args.arch[:3] != 'stn' else\
             models.__dict__[args.arch](\
-            num_classes=num_classes, pretrained=args.pretrained,\
-            writer=writer, \
-            mean=torch.tensor(np.array(mean, dtype=np.float32)\
-            .reshape(1, 3, 1, 1)).cuda(),\
-            std=torch.tensor(np.array(std, dtype=np.float32)\
-            .reshape(1, 3, 1, 1)).cuda())
+            num_classes=num_classes, pretrained=args.pretrained)
 
 
 
+    # define loss function (criterion) and optimizer
+    criterion = nn.CrossEntropyLoss().cuda()
+
+    __stn__ = []
+    __normal__ = []
+    if args.arch[:3] == 'stn':
+        __stn__.append({
+            'params': model.fc_loc.parameters(),
+            'lr': args.lr * stn_lr_rate,
+            'name': 'stn',
+        })
+        __stn__.append({
+            'params': model.localization.parameters(),
+            'lr': args.lr * stn_lr_rate,
+            'name': 'stn',
+        })
+        __normal__ = model.cnn.parameters()
+    else:
+        __normal__ = model.parameters()
+
+
+    optimizer = torch.optim.SGD([{
+            'params': __normal__, 'name': 'normal',
+        }] + __stn__,
+        lr=args.lr, 
+        momentum=args.momentum, 
+        weight_decay=args.weight_decay
+    )
+
+    
     if not args.distributed:
         if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
             model.features = torch.nn.DataParallel(model.features)
@@ -150,12 +191,7 @@ def main():
         model.cuda()
         model = torch.nn.parallel.DistributedDataParallel(model)
 
-    # define loss function (criterion) and optimizer
-    criterion = nn.CrossEntropyLoss().cuda()
 
-    optimizer = torch.optim.SGD(model.parameters(), args.lr,
-                                momentum=args.momentum,
-                                weight_decay=args.weight_decay)
 
     # optionally resume from a checkpoint
     if args.resume:
@@ -255,15 +291,24 @@ def train(train_loader, model, criterion, optimizer, epoch):
     for i, (input, target) in enumerate(train_loader):
         # measure data loading time
         data_time.update(time.time() - end)
-        
+
         input = torch.autograd.Variable(input.cuda())
         target = torch.autograd.Variable(target.cuda())
 
-        # if cnt[0] == 0:
-        #     writer.add_graph(model, (input,))
-
         # compute output
-        output = model(input)
+
+        if args.arch[:3] == 'stn':
+            output, img, theta = model(input)
+            img = img * torch_std
+            img = img + torch_mean
+            img = torchvision.utils.make_grid(img)
+            writer.add_image('stn/train', img, cnt[0])
+            for idx, each in enumerate(theta.data):
+                for idy, every in enumerate(each.data):
+                    writer.add_scalar('batch_%d/theta_%d/train' % (idx, idy), every.item(), cnt[0])
+        else:
+            output = model(input)
+
         loss = criterion(output, target)
 
         cnt[0] += 1
@@ -314,7 +359,19 @@ def validate(val_loader, model, criterion):
             target = torch.autograd.Variable(target.cuda())
 
             # compute output
-            output = model(input)
+
+            if args.arch[:3] == 'stn':
+                output, img, theta = model(input)
+                img = img * torch_std
+                img = img + torch_mean
+                img = torchvision.utils.make_grid(img)
+                writer.add_image('stn/val', img, cnt[0])
+                for idx, each in enumerate(theta.data):
+                    for idy, every in enumerate(each.data):
+                        writer.add_scalar('batch_%d/theta_%d/val' % (idx, idy), every.item(), cnt[0])
+            else:
+                output = model(input)
+
             loss = criterion(output, target)
 
             # measure accuracy and record loss
@@ -376,11 +433,16 @@ class AverageMeter(object):
 
 def adjust_learning_rate(optimizer, epoch):
     """
-    Sets the learning rate to the initial LR decayed by 10 every 20 epochs
+    Sets the learning rate to the initial LR decayed by 10 every 30 epochs
     """
     lr = args.lr * (0.1 ** (epoch // 30))
+    stn_lr = lr * stn_lr_rate
+
     for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
+        if param_group['name'] == 'stn':
+            param_group['lr'] = stn_lr
+        else:
+            param_group['lr'] = lr
 
 
 def accuracy(output, target, topk=(1,)):
