@@ -303,6 +303,11 @@ def train(train_loader, model, criterion, optimizer, epoch):
             img = img + torch_mean
             img = torchvision.utils.make_grid(img)
             writer.add_image('stn/train', img, cnt[0])
+            img = input
+            img = img * torch_std
+            img = img + torch_mean
+            img = torchvision.utils.make_grid(img)
+            writer.add_image('origin/train', img, cnt[0])
             for idx, each in enumerate(theta.data):
                 for idy, every in enumerate(each.data):
                     writer.add_scalar('batch_%d/theta_%d/train' % (idx, idy), every.item(), cnt[0])
@@ -366,6 +371,11 @@ def validate(val_loader, model, criterion):
                 img = img + torch_mean
                 img = torchvision.utils.make_grid(img)
                 writer.add_image('stn/val', img, cnt[0])
+                img = input
+                img = img * torch_std
+                img = img + torch_mean
+                img = torchvision.utils.make_grid(img)
+                writer.add_image('origin/val', img, cnt[0])
                 for idx, each in enumerate(theta.data):
                     for idy, every in enumerate(each.data):
                         writer.add_scalar('batch_%d/theta_%d/val' % (idx, idy), every.item(), cnt[0])
