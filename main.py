@@ -1,4 +1,5 @@
 import argparse
+import numpy as np
 import os
 import shutil
 import json
@@ -126,13 +127,18 @@ def main():
         dist.init_process_group(backend=args.dist_backend,\
                 init_method=args.dist_url, world_size=args.world_size)
 
-    # create model
-    if args.pretrained:
-        print("=> using pre-trained model '{}'".format(args.arch))
-        model = models.__dict__[args.arch](num_classes=num_classes, pretrained=True)
-    else:
-        print("=> creating model '{}'".format(args.arch))
-        model = models.__dict__[args.arch](num_classes=num_classes)
+    model = models.__dict__[args.arch](\
+            num_classes=num_classes, pretrained=args.pretrained)\
+            if args.arch[:3] != 'stn' else\
+            models.__dict__[args.arch](\
+            num_classes=num_classes, pretrained=args.pretrained,\
+            writer=writer, \
+            mean=torch.tensor(np.array(mean, dtype=np.float32)\
+            .reshape(1, 3, 1, 1)).cuda(),\
+            std=torch.tensor(np.array(std, dtype=np.float32)\
+            .reshape(1, 3, 1, 1)).cuda())
+
+
 
     if not args.distributed:
         if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):

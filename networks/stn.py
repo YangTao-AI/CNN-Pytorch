@@ -3,6 +3,8 @@ import torch.nn as nn
 import torchvision.models as models
 import torchvision.utils
 from IPython import embed
+import torch.nn.functional as F
+
 
 class Stn(nn.Module):
     def __init__(self, cnn_localization, cnn, localization_fc, **kwargs):
@@ -36,10 +38,14 @@ class Stn(nn.Module):
 
     def forward(self, x):
         x = self.stn(x)
-        if 'writer' in kwargs:
+        if 'writer' in self.kwargs:
             img = torchvision.utils.make_grid(x)
+            if 'std' in self.kwargs:
+                img = img * self.kwargs['std']
+            if 'mean' in self.kwargs:
+                img = img + self.kwargs['mean']
+            img = img * 255
             embed()
-
         x = self.cnn(x)
         return x
 
