@@ -15,7 +15,6 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 # }}}
-from IPython import embed
 
 from tensorboardX import SummaryWriter
 from my_folder import MyImageFolder
@@ -30,16 +29,14 @@ num_classes = 200
 mean = [0.4856077, 0.49941534, 0.43237692]
 std = [0.23222743, 0.2277201, 0.26586822]
 # mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-USE_TORCHVISION = True
+USE_TORCHVISION = False
 # }}}
 if USE_TORCHVISION:# {{{
-    print('USE_TORCHVISION')
     import torchvision.models as models
     model_names = sorted(name for name in models.__dict__
         if name.islower() and not name.startswith("__")
         and callable(models.__dict__[name]))
 else:
-    print('NOT_USE_TORCHVISION')
     import networks as models
     model_names = sorted(name for name in models.__dict__
         if name.islower() and not name.startswith("__")
