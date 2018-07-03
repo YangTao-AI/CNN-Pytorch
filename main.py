@@ -24,7 +24,6 @@ from IPython import embed
 from tensorboardX import SummaryWriter
 from my_folder import MyImageFolder
 
-stn_lr_rate = 1e-4
 #Params {{{
 '''
     Params
@@ -85,6 +84,8 @@ parser.add_argument('-e', '--evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true',
                     help='use pre-trained model')
+parser.add_argument('--stn-rate', default=1e-4, type=float)
+parser.add_argument('--extra', default='', type=str)
 parser.add_argument('--world-size', default=1, type=int,
                     help='number of distributed processes')
 parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456',\
@@ -103,6 +104,9 @@ def main():
         args.logdir = '{},{},lr:{},wd:{}'.format(args.arch,
                 'pretrained' if args.pretrained else 'not-pretrained',
                 args.lr, args.weight_decay)
+    if len(args.extra) > 0:
+        args.logdir += ':' + args.extra
+
     args.__dict__['USE_TORCHVISION'] = USE_TORCHVISION
     args.__dict__['num_classes'] = num_classes
     args.__dict__['std'] = std
@@ -149,6 +153,9 @@ def main():
             models.__dict__[args.arch](\
             num_classes=num_classes, pretrained=args.pretrained)
 
+    with open(os.path.join(args.logdir, 'network.txt'), 'w') as f:
+        f.write('{}'.format(model))
+
 
 
     # define loss function (criterion) and optimizer
@@ -159,12 +166,12 @@ def main():
     if args.arch[:3] == 'stn':
         __stn__.append({
             'params': model.fc_loc.parameters(),
-            'lr': args.lr * stn_lr_rate,
+            'lr': args.lr * args.stn_rate,
             'name': 'stn',
         })
         __stn__.append({
             'params': model.localization.parameters(),
-            'lr': args.lr * stn_lr_rate,
+            'lr': args.lr * args.stn_rate,
             'name': 'stn',
         })
         __normal__ = model.cnn.parameters()
@@ -247,6 +254,7 @@ def main():
 
     if args.evaluate:
         validate(val_loader, model, criterion)
+        writer.close()
         return
 
     cnt[0] = args.start_epoch * len(train_loader)
@@ -261,6 +269,8 @@ def main():
         # evaluate on validation set
         prec1 = validate(val_loader, model, criterion)
 
+        writer.flush()
+
         # remember best prec@1 and save checkpoint
         if epoch % args.save_per_epoch == args.save_per_epoch - 1\
                 or epoch == 0:
@@ -273,6 +283,7 @@ def main():
                 'best_prec1': best_prec1,
                 'optimizer' : optimizer.state_dict(),
             }, is_best)
+
     writer.close()
 
 
@@ -446,7 +457,7 @@ def adjust_learning_rate(optimizer, epoch):
     Sets the learning rate to the initial LR decayed by 10 every 30 epochs
     """
     lr = args.lr * (0.1 ** (epoch // 30))
-    stn_lr = lr * stn_lr_rate
+    stn_lr = lr * args.stn_rate
 
     for param_group in optimizer.param_groups:
         if param_group['name'] == 'stn':
