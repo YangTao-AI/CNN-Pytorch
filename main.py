@@ -20,6 +20,7 @@ import torchvision
 
 from networks.stn import Stn
 from IPython import embed
+from config import *
 
 from tensorboardX import SummaryWriter
 from my_folder import MyImageFolder
@@ -30,17 +31,15 @@ from my_folder import MyImageFolder
 '''
 cnt = [0]
 best_prec1 = 0
-num_classes = 200
-mean = [0.4856077, 0.49941534, 0.43237692]
-std = [0.23222743, 0.2277201, 0.26586822]
-# mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+init_theta = [0.5, 0, 0, 0, 0.5, 0]
 USE_TORCHVISION = False
+dataset = cub
 # }}}
 
 
-torch_mean=torch.tensor(np.array(mean, dtype=np.float32).\
+torch_mean=torch.tensor(np.array(dataset.mean, dtype=np.float32).\
         reshape(1, 3, 1, 1)).cuda()
-torch_std=torch.tensor(np.array(std, dtype=np.float32).\
+torch_std=torch.tensor(np.array(dataset.std, dtype=np.float32).\
         reshape(1, 3, 1, 1)).cuda()
 
 if USE_TORCHVISION:# {{{
@@ -56,13 +55,11 @@ else:
 # }}}
 
 parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
-parser.add_argument('data', metavar='DIR', help='path to dataset')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',\
         choices=model_names, help='model architecture: '+\
         ' | '.join(model_names)+' (default: resnet18)')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',\
-        help='number of data loading workers (default: 0)'+
-        'when use zipfile multi-thread will cause runtime error')
+        help='number of data loading workers (default: 0)')
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
@@ -95,22 +92,27 @@ parser.add_argument('--dist-backend', default='gloo', type=str,
 parser.add_argument('--logdir', default='train_log', type=str, 
                     help='logdir for tensorboard')
 parser.add_argument('--data-cached', default=False, action='store_true')
-
+parser.add_argument('--augmentation', default='crop', type=str,\
+        choices=['crop', 'resize'])
 
 def main():
+    print('-'*32)
     global args, best_prec1, writer
     args = parser.parse_args()
+
+    args.__dict__['dataset'] = dataset.name
+    args.__dict__['data'] = dataset.path
+    args.__dict__['USE_TORCHVISION'] = USE_TORCHVISION
+    args.__dict__['classes'] = dataset.classes
+    args.__dict__['std'] = dataset.std
+    args.__dict__['mean'] = dataset.mean
+
     if args.logdir == 'train_log':
-        args.logdir = '{},{},lr:{},wd:{}'.format(args.arch,
+        args.logdir = '{},{},lr:{},wd:{}:{}'.format(args.arch,
                 'pretrained' if args.pretrained else 'not-pretrained',
-                args.lr, args.weight_decay)
+                args.lr, args.weight_decay, dataset.name)
     if len(args.extra) > 0:
         args.logdir += ':' + args.extra
-
-    args.__dict__['USE_TORCHVISION'] = USE_TORCHVISION
-    args.__dict__['num_classes'] = num_classes
-    args.__dict__['std'] = std
-    args.__dict__['mean'] = mean
 
     args.distributed = args.world_size > 1
     if args.data_cached:
@@ -133,7 +135,7 @@ def main():
     if not os.path.isdir(args.logdir):
         os.makedirs(args.logdir)
 
-    print(args)
+    print('[LOG]', args, '\n')
     with open(os.path.join(args.logdir, 'args.txt'), 'w') as f:
         json.dump(args.__dict__, f)
     
@@ -148,15 +150,17 @@ def main():
                 init_method=args.dist_url, world_size=args.world_size)
 
     model = models.__dict__[args.arch](\
-            num_classes=num_classes, pretrained=args.pretrained)\
-            if args.arch[:3] != 'stn' else\
-            models.__dict__[args.arch](\
-            num_classes=num_classes, pretrained=args.pretrained)
+            num_classes=dataset.classes, 
+            pretrained=args.pretrained
+    ) if args.arch[:3] != 'stn' else models.__dict__[args.arch](
+        num_classes=dataset.classes, 
+        localization_fc=128,
+        pretrained=args.pretrained, \
+        theta=init_theta
+    )
 
     with open(os.path.join(args.logdir, 'network.txt'), 'w') as f:
         f.write('{}'.format(model))
-
-
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
@@ -219,13 +223,16 @@ def main():
     # Data loading code
     traindir = os.path.join(args.data, 'train.zip')
     valdir = os.path.join(args.data, 'val.zip')
-    normalize = transforms.Normalize(mean, std)
+    normalize = transforms.Normalize(dataset.mean, dataset.std)
 
     train_dataset = MyImageFolder(
         traindir,
-        transforms.Compose([
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
+        transforms.Compose(([
+            transforms.RandomResizedCrop(dataset.shape)
+        ] if args.augmentation == 'crop' else [
+            transforms.Resize(dataset.shape),
+            transforms.CenterCrop(dataset.shape)
+        ]) + [transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize,
         ]), data_cached=args.data_cached, num_workers=args.workers)
@@ -244,8 +251,8 @@ def main():
 
     val_loader = torch.utils.data.DataLoader(
         MyImageFolder(valdir, transforms.Compose([
-            transforms.Resize(224),
-            transforms.CenterCrop(224),
+            transforms.Resize(dataset.shape),
+            transforms.CenterCrop(dataset.shape),
             transforms.ToTensor(),
             normalize,
         ]), data_cached=args.data_cached, num_workers=args.workers),
@@ -256,7 +263,8 @@ def main():
         validate(val_loader, model, criterion)
         writer.close()
         return
-
+    
+    print('[LOG] ready, GO!')
     cnt[0] = args.start_epoch * len(train_loader)
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
@@ -268,8 +276,6 @@ def main():
 
         # evaluate on validation set
         prec1 = validate(val_loader, model, criterion)
-
-        writer.flush()
 
         # remember best prec@1 and save checkpoint
         if epoch % args.save_per_epoch == args.save_per_epoch - 1\
@@ -310,18 +316,10 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         if args.arch[:3] == 'stn':
             output, img, theta = model(input)
-            img = img * torch_std
-            img = img + torch_mean
-            img = torchvision.utils.make_grid(img)
-            writer.add_image('stn/train', img, cnt[0])
-            img = input
-            img = img * torch_std
-            img = img + torch_mean
-            img = torchvision.utils.make_grid(img)
-            writer.add_image('origin/train', img, cnt[0])
-            for idx, each in enumerate(theta.data):
-                for idy, every in enumerate(each.data):
-                    writer.add_scalar('batch_%d/theta_%d/train' % (idx, idy), every.item(), cnt[0])
+            if i == 0:
+                for idy, every in enumerate(theta.data[0].data):
+                    writer.add_scalar('theta_%d/train' % idy,\
+                            every.item(), cnt[0])
         else:
             output = model(input)
 
@@ -378,18 +376,19 @@ def validate(val_loader, model, criterion):
 
             if args.arch[:3] == 'stn':
                 output, img, theta = model(input)
-                img = img * torch_std
-                img = img + torch_mean
-                img = torchvision.utils.make_grid(img)
-                writer.add_image('stn/val', img, cnt[0])
-                img = input
-                img = img * torch_std
-                img = img + torch_mean
-                img = torchvision.utils.make_grid(img)
-                writer.add_image('origin/val', img, cnt[0])
-                for idx, each in enumerate(theta.data):
-                    for idy, every in enumerate(each.data):
-                        writer.add_scalar('batch_%d/theta_%d/val' % (idx, idy), every.item(), cnt[0])
+                if i == 0:
+                    img = img * torch_std
+                    img = img + torch_mean
+                    img = torchvision.utils.make_grid(img)
+                    writer.add_image('stn/val', img, cnt[0])
+                    img = input
+                    img = img * torch_std
+                    img = img + torch_mean
+                    img = torchvision.utils.make_grid(img)
+                    writer.add_image('origin/val', img, cnt[0])
+                    for idy, every in enumerate(theta.data[0].data):
+                        writer.add_scalar('theta_%d/val' % idy,\
+                                every.item(), cnt[0])
             else:
                 output = model(input)
 

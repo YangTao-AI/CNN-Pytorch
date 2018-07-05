@@ -7,7 +7,8 @@ import torch.nn.functional as F
 
 
 class Stn(nn.Module):
-    def __init__(self, cnn_localization, cnn, localization_fc):
+    def __init__(self, cnn_localization, cnn, localization_fc, \
+            theta=[1, 0, 0, 0, 1, 0]):
         super(Stn, self).__init__()
 
         # Spatial transformer localization-network
@@ -24,7 +25,8 @@ class Stn(nn.Module):
 
         # Initialize the weights/bias with identity transformation
         self.fc_loc[2].weight.data.zero_()
-        self.fc_loc[2].bias.data.copy_(torch.tensor([1, 0, 0, 0, 1, 0], dtype=torch.float))
+        self.fc_loc[2].bias.data.copy_(torch.tensor(theta, \
+                dtype=torch.float))
 
     def stn(self, x):
         xs = self.localization(x)
@@ -40,17 +42,17 @@ class Stn(nn.Module):
         x = self.cnn(stn_img)
         return x, stn_img, theta
 
-def stn_resnet18(num_classes, localization_fc=128, pretrained=False):
+def stn_resnet18(num_classes, localization_fc=128, pretrained=False, **kwargs):
     resnet18 = models.resnet18
     resnet18_local = resnet18(pretrained, num_classes=localization_fc)
     resnet18_cnn = resnet18(pretrained, num_classes=num_classes)
-    return Stn(resnet18_local, resnet18_cnn, localization_fc)
+    return Stn(resnet18_local, resnet18_cnn, localization_fc, **kwargs)
 
-def stn_resnet50(num_classes, localization_fc=128, pretrained=False):
+def stn_resnet50(num_classes, localization_fc=128, pretrained=False, **kwargs):
     resnet50 = models.resnet50
     resnet50_local = resnet50(pretrained, num_classes=localization_fc)
     resnet50_cnn = resnet50(pretrained, num_classes=num_classes)
-    return Stn(resnet50_local, resnet50_cnn, localization_fc)
+    return Stn(resnet50_local, resnet50_cnn, localization_fc, **kwargs)
 
 if __name__ == '__main__':
     _stn_resnet18 = stn_resnet18(200, 128, True)
