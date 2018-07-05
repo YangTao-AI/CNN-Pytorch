@@ -97,8 +97,9 @@ parser.add_argument('--augmentation', default='crop', type=str,\
 
 def main():
     print('-'*32)
-    global args, best_prec1, writer
+    global args, best_prec1, writer, nrow
     args = parser.parse_args()
+    nrow = int(round(np.sqrt(args.batch_size)))
 
     args.__dict__['dataset'] = dataset.name
     args.__dict__['data'] = dataset.path
@@ -158,6 +159,12 @@ def main():
         pretrained=args.pretrained, \
         theta=init_theta
     )
+
+    input_data = torch.autograd.Variable(
+        torch.Tensor(1, dataset.channel, dataset.shape, dataset.shape),
+        requires_grad=True
+    )
+    writer.add_graph(model, (input_data, ))
 
     with open(os.path.join(args.logdir, 'network.txt'), 'w') as f:
         f.write('{}'.format(model))
@@ -259,6 +266,8 @@ def main():
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
+
+
     if args.evaluate:
         validate(val_loader, model, criterion)
         writer.close()
@@ -313,6 +322,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
         target = torch.autograd.Variable(target.cuda())
 
         # compute output
+
 
         if args.arch[:3] == 'stn':
             output, img, theta = model(input)
@@ -379,12 +389,12 @@ def validate(val_loader, model, criterion):
                 if i == 0:
                     img = img * torch_std
                     img = img + torch_mean
-                    img = torchvision.utils.make_grid(img)
+                    img = torchvision.utils.make_grid(img, nrow=nrow)
                     writer.add_image('stn/val', img, cnt[0])
                     img = input
                     img = img * torch_std
                     img = img + torch_mean
-                    img = torchvision.utils.make_grid(img)
+                    img = torchvision.utils.make_grid(img, nrow=nrow)
                     writer.add_image('origin/val', img, cnt[0])
                     for idy, every in enumerate(theta.data[0].data):
                         writer.add_scalar('theta_%d/val' % idy,\

@@ -1,11 +1,12 @@
 class Config(object):
-    def __init__(self, name, classes, mean, std, path, shape):
+    def __init__(self, name, classes, mean, std, path, shape, channel=3):
         self.name = name
         self.mean = mean
         self.std = std
         self.path = path
         self.classes = classes
         self.shape = shape
+        self.channel = channel
 
 
 
