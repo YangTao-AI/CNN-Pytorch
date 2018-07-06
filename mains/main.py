@@ -1,10 +1,9 @@
-import argparse
+import argparse, os, shutil, json, time, sys
 import numpy as np
-import os
-import shutil
-import json
-import time, sys
-# torch header# {{{
+
+'''
+    torch header
+'''
 import torch
 import torch.nn as nn
 import torch.nn.parallel
@@ -16,7 +15,7 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision
-# }}}
+
 
 from IPython import embed
 from config import *
@@ -24,35 +23,27 @@ from config import *
 from tensorboardX import SummaryWriter
 from my_folder import MyImageFolder
 
-#Params {{{
+
 '''
     Params
 '''
-cnt = [0]
-best_prec1 = 0
 USE_TORCHVISION = False
 dataset = cub
-# }}}
 
-
-torch_mean=torch.tensor(np.array(dataset.mean, dtype=np.float32).\
-        reshape(1, 3, 1, 1)).cuda()
-torch_std=torch.tensor(np.array(dataset.std, dtype=np.float32).\
-        reshape(1, 3, 1, 1)).cuda()
 
 if USE_TORCHVISION:# {{{
     import torchvision.models as models
     model_names = sorted(name for name in models.__dict__
         if name.islower() and not name.startswith("__")
         and callable(models.__dict__[name]))
-else:
+else:   #   use local networks
     import networks as models
     model_names = sorted(name for name in models.__dict__
         if name.islower() and not name.startswith("__")
         and callable(models.__dict__[name]))
 # }}}
 
-parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+parser = argparse.ArgumentParser(description='PyTorch CNN Training')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',\
         choices=model_names, help='model architecture: '+\
         ' | '.join(model_names)+' (default: resnet18)')
@@ -94,7 +85,9 @@ parser.add_argument('--augmentation', default='crop', type=str,\
 
 def main():
     print('-'*32)
-    global args, best_prec1, writer
+    global args, best_prec1, writer, cnt
+    cnt = 0
+    best_prec1 = 0
     args = parser.parse_args()
 
     args.__dict__['dataset'] = dataset.name
@@ -172,7 +165,6 @@ def main():
         momentum=args.momentum, 
         weight_decay=args.weight_decay
     )
-
     
     if not args.distributed:
         if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
@@ -249,7 +241,7 @@ def main():
         return
     
     print('[LOG] ready, GO!')
-    cnt[0] = args.start_epoch * len(train_loader)
+    cnt = args.start_epoch * len(train_loader)
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
@@ -303,18 +295,15 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
         loss = criterion(output, target)
 
-        cnt[0] += 1
+        cnt += 1
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output, target, topk=(1, 5))
         losses.update(loss.item(), input.size(0))
         top1.update(prec1[0], input.size(0))
         top5.update(prec5[0], input.size(0))
-        writer.add_scalar('loss/train', loss, cnt[0])
-        writer.add_scalar('prec1/train', prec1, cnt[0])
-        # writer.add_scalar('prec5/train', prec5, cnt[0])
-        # writer.add_scalar('cnt', cnt[0], cnt[0])
-        # writer.add_scalar('epoch', epoch, cnt[0])
+        writer.add_scalar('loss/train', loss, cnt)
+        writer.add_scalar('accuracy/train', prec1, cnt)
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -379,9 +368,8 @@ def validate(val_loader, model, criterion):
         print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
               .format(top1=top1, top5=top5))
 
-        writer.add_scalar('loss/val', losses.avg, cnt[0])
-        writer.add_scalar('prec1/val', top1.avg, cnt[0])
-        # writer.add_scalar('prec5/val', top5.avg, cnt[0])
+        writer.add_scalar('loss/val', losses.avg, cnt)
+        writer.add_scalar('accuracy/val', top1.avg, cnt)
 
     return top1.avg
 
