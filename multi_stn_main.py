@@ -18,6 +18,7 @@ import torchvision.datasets as datasets
 import torchvision
 # }}}
 
+from networks.stn import Stn
 from IPython import embed
 from config import *
 
@@ -30,6 +31,7 @@ from my_folder import MyImageFolder
 '''
 cnt = [0]
 best_prec1 = 0
+init_theta = [0.5, 0, 0, 0, 0.5, 0]
 USE_TORCHVISION = False
 dataset = cub
 # }}}
@@ -56,8 +58,12 @@ parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
 parser.add_argument('--arch', '-a', metavar='ARCH', default='resnet18',\
         choices=model_names, help='model architecture: '+\
         ' | '.join(model_names)+' (default: resnet18)')
+parser.add_argument('--submodle', metavar='ARCH', default='stn_resnet18',\
+        choices=model_names, help='model architecture: '+\
+        ' | '.join(model_names)+' (default: resnet18)')
 parser.add_argument('-j', '--workers', default=0, type=int, metavar='N',\
         help='number of data loading workers (default: 0)')
+parser.add_argument('-n', '--stn', default=2, type=int)
 parser.add_argument('--epochs', default=90, type=int, metavar='N',
                     help='number of total epochs to run')
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
@@ -79,6 +85,7 @@ parser.add_argument('-e', '--evaluate', action='store_true',
                     help='evaluate model on validation set')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true',
                     help='use pre-trained model')
+parser.add_argument('--stn-rate', default=1e-4, type=float)
 parser.add_argument('--extra', default='', type=str)
 parser.add_argument('--world-size', default=1, type=int,
                     help='number of distributed processes')
@@ -147,9 +154,13 @@ def main():
                 init_method=args.dist_url, world_size=args.world_size)
 
     model = models.__dict__[args.arch](
+        args.stn,
+        models.__dict__[args.submodel],
         num_classes=dataset.classes, 
-        pretrained=args.pretrained
-    ) 
+        localization_fc=128,
+        pretrained=args.pretrained,
+        theta=init_theta
+    )
 
     input_data = torch.autograd.Variable(
         torch.Tensor(1, dataset.channel, dataset.shape, dataset.shape),
@@ -162,12 +173,31 @@ def main():
 
     # define loss function (criterion) and optimizer
     criterion = nn.CrossEntropyLoss().cuda()
-
-    __normal__ = model.parameters()
-
+    
+    __stn__ = []
+    __normal__ = []
+    for each in model.stn:
+        __stn__.append({
+            'params': each.fc_loc.parameters(),
+            'lr': args.lr * args.stn_rate,
+            'name': 'stn',
+        })
+        __stn__.append({
+            'params': each.localization.parameters(),
+            'lr': args.lr * args.stn_rate,
+            'name': 'stn',
+        })
+        __normal__.append({
+            'params': each.cnn.parameters(),
+            'name': 'normal',
+        })
+    __normal__.append({
+        'params': model.ffc.parameters(),
+        'name': 'normal',
+    })
 
     optimizer = torch.optim.SGD(
-        [{'params': __normal__, 'name': 'normal'}],
+        __normal__ + __stn__,
         lr=args.lr, 
         momentum=args.momentum, 
         weight_decay=args.weight_decay
@@ -299,7 +329,12 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # compute output
 
 
-        output = model(input)
+        output, img, theta = model(input)
+        if i == 0:
+            for idy, every in enumerate(theta.data[0].data):
+                writer.add_scalar('theta_%d/train' % idy,\
+                        every.item(), cnt[0])
+
 
         loss = criterion(output, target)
 
@@ -352,7 +387,21 @@ def validate(val_loader, model, criterion):
 
             # compute output
 
-            output = model(input)
+            output, img, theta = model(input)
+            if i == 0:
+                img = torch.cat([
+                    input.view(-1, 1, *input.size()[1:]),
+                    img.view(-1, args.stn, *img.size()[1:])
+                ], 1)
+                img = img.view(-1, *img.size()[2:])
+                img = img * torch_std
+                img = img + torch_mean
+                img = img[:4*(args.stn+1)*16]
+                img = torchvision.utils.make_grid(img, nrow=4*(args.stn+1))
+                writer.add_image('image', img, cnt[0])
+                for idy, every in enumerate(theta.data[0].data):
+                    writer.add_scalar('theta_%d/val' % idy,\
+                            every.item(), cnt[0])
 
             loss = criterion(output, target)
 
@@ -418,9 +467,13 @@ def adjust_learning_rate(optimizer, epoch):
     Sets the learning rate to the initial LR decayed by 10 every 30 epochs
     """
     lr = args.lr * (0.1 ** (epoch // 30))
+    stn_lr = lr * args.stn_rate
 
     for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
+        if param_group['name'] == 'stn':
+            param_group['lr'] = stn_lr
+        else:
+            param_group['lr'] = lr
 
 
 def accuracy(output, target, topk=(1,)):
