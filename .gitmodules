@@ -1,0 +1,3 @@
+[submodule "convert_torch_to_pytorch"]
+	path = convert_torch_to_pytorch
+	url = https://github.com/indestinee/convert_torch_to_pytorch
