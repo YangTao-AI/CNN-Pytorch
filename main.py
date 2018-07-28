@@ -83,6 +83,8 @@ parser.add_argument('--data-cached', default=False, action='store_true')
 parser.add_argument('--augmentation', default='crop', type=str,\
         choices=['crop', 'resize'])
 
+
+
 def main():
     print('-'*32)
     global args, best_prec1, writer, cnt
@@ -270,6 +272,7 @@ def main():
 
 
 def train(train_loader, model, criterion, optimizer, epoch):
+    global cnt
     batch_time = AverageMeter()
     data_time = AverageMeter()
     losses = AverageMeter()
@@ -326,6 +329,7 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
 
 def validate(val_loader, model, criterion):
+    global cnt
     batch_time = AverageMeter()
     losses = AverageMeter()
     top1 = AverageMeter()
