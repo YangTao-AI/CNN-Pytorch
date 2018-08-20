@@ -13,23 +13,18 @@ import torch.optim
 import torch.utils.data
 import torch.utils.data.distributed
 import torchvision.transforms as transforms
-import torchvision.datasets as datasets
 import torchvision
 
 
+from dataset import myDataset
 from IPython import embed
-from config import *
-
 from tensorboardX import SummaryWriter
-from my_folder import MyImageFolder
 
 
 '''
     Params
 '''
-USE_TORCHVISION = True
-dataset = cub
-
+USE_TORCHVISION = False
 
 if USE_TORCHVISION:# {{{
     import torchvision.models as models
@@ -92,24 +87,15 @@ def main():
     best_prec1 = 0
     args = parser.parse_args()
 
-    args.__dict__['dataset'] = dataset.name
-    args.__dict__['data'] = dataset.path
-    args.__dict__['USE_TORCHVISION'] = USE_TORCHVISION
-    args.__dict__['classes'] = dataset.classes
-    args.__dict__['std'] = dataset.std
-    args.__dict__['mean'] = dataset.mean
-
     if args.logdir == 'train_log':
-        args.logdir = '{},{},lr:{},wd:{}:{}'.format(args.arch,
+        args.logdir = '{};{};lr:{};wd:{};'.format(args.arch,
                 'pretrained' if args.pretrained else 'not-pretrained',
-                args.lr, args.weight_decay, dataset.name)
+                args.lr, args.weight_decay)
+
     if len(args.extra) > 0:
-        args.logdir += ':' + args.extra
+        args.logdir += args.extra
 
     args.distributed = args.world_size > 1
-    if args.data_cached:
-        print('[WRN] --data-cached costs extra memory.\n' + 
-              '      Which may cause OOM(out of memory).\n')
 
     def touchdir(path):
         if os.path.isdir(path) or os.path.isfile(path):

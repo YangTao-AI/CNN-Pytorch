@@ -1,3 +1,6 @@
 [submodule "convert_torch_to_pytorch"]
 	path = convert_torch_to_pytorch
 	url = https://github.com/indestinee/convert_torch_to_pytorch
+[submodule "Captcha-Bot"]
+	path = Captcha-Bot
+	url = https://github.com/indestinee/Captcha-Bot
