@@ -1,10 +1,11 @@
 import argparse, os, shutil, json, time, sys
+
 import numpy as np
 
 '''
     torch header
 '''
-import torch
+import torch, json
 import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
@@ -16,7 +17,7 @@ import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 import torchvision
 
-
+import pickle
 from IPython import embed
 from config import *
 
@@ -28,8 +29,9 @@ from my_folder import MyImageFolder
     Params
 '''
 USE_TORCHVISION = True
-dataset = cub
-
+dataset = Al
+with open('./train_val.pkl', 'rb') as f:
+    train_dic, val_dic = pickle.load(f)
 
 if USE_TORCHVISION:# {{{
     import torchvision.models as models
@@ -54,15 +56,15 @@ parser.add_argument('--epochs', default=90, type=int, metavar='N',
 parser.add_argument('--start-epoch', default=0, type=int, metavar='N',
                     help='manual epoch number (useful on restarts)')
 parser.add_argument('--save-per-epoch', default=5, type=int)
-parser.add_argument('-b', '--batch-size', default=32, type=int,
-                    metavar='N', help='mini-batch size (default: 32)')
+parser.add_argument('-b', '--batch-size', default=128, type=int,
+                    metavar='N', help='mini-batch size (default: 128)')
 parser.add_argument('--lr', '--learning-rate', default=0.01, type=float,
                     metavar='LR', help='initial learning rate')
 parser.add_argument('--momentum', default=0.9, type=float, metavar='M',
                     help='momentum')
 parser.add_argument('--weight-decay', '--wd', default=5e-4, type=float,
                     metavar='W', help='weight decay (default: 5e-4)')
-parser.add_argument('--print-freq', '-p', default=10, type=int,
+parser.add_argument('--print-freq', '-p', default=1, type=int,
                     metavar='N', help='print frequency (default: 10)')
 parser.add_argument('--resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default: none)')
@@ -71,12 +73,6 @@ parser.add_argument('-e', '--evaluate', action='store_true',
 parser.add_argument('--pretrained', dest='pretrained', action='store_true',
                     help='use pre-trained model')
 parser.add_argument('--extra', default='', type=str)
-parser.add_argument('--world-size', default=1, type=int,
-                    help='number of distributed processes')
-parser.add_argument('--dist-url', default='tcp://224.66.41.62:23456',\
-        type=str, help='url used to set up distributed training')
-parser.add_argument('--dist-backend', default='gloo', type=str,
-                    help='distributed backend')
 parser.add_argument('--logdir', default='train_log', type=str, 
                     help='logdir for tensorboard')
 parser.add_argument('--data-cached', default=False, action='store_true')
@@ -85,19 +81,44 @@ parser.add_argument('--augmentation', default='crop', type=str,\
 
 
 
-def main():
+def main(get_model=False):
     print('-'*32)
     global args, best_prec1, writer, cnt
+    # optionally resume from a checkpoint
+    def load_checkpoint(get_model):
+        if args.resume:
+            if os.path.isfile(args.resume):
+                print("=> loading checkpoint '{}'".format(args.resume))
+                checkpoint = torch.load(args.resume)
+                args.start_epoch = checkpoint['epoch']
+                best_prec1 = checkpoint['best_prec1']
+                model.load_state_dict(checkpoint['state_dict'])
+                if not get_model:
+                    optimizer.load_state_dict(checkpoint['optimizer'])
+                print("=> loaded checkpoint '{}' (epoch {})"
+                      .format(args.resume, checkpoint['epoch']))
+            else:
+                print("=> no checkpoint found at '{}'".format(args.resume))
     cnt = 0
     best_prec1 = 0
     args = parser.parse_args()
 
+    model = models.__dict__[args.arch](
+        num_classes=dataset.classes, 
+        pretrained=args.pretrained
+    ) 
+
+    if get_model:
+        load_checkpoint(get_model)
+        return model
     args.__dict__['dataset'] = dataset.name
     args.__dict__['data'] = dataset.path
     args.__dict__['USE_TORCHVISION'] = USE_TORCHVISION
     args.__dict__['classes'] = dataset.classes
     args.__dict__['std'] = dataset.std
     args.__dict__['mean'] = dataset.mean
+
+
 
     if args.logdir == 'train_log':
         args.logdir = '{},{},lr:{},wd:{}:{}'.format(args.arch,
@@ -106,7 +127,6 @@ def main():
     if len(args.extra) > 0:
         args.logdir += ':' + args.extra
 
-    args.distributed = args.world_size > 1
     if args.data_cached:
         print('[WRN] --data-cached costs extra memory.\n' + 
               '      Which may cause OOM(out of memory).\n')
@@ -137,20 +157,12 @@ def main():
             os.makedirs(path)
 
     writer = SummaryWriter(os.path.join(args.logdir, 'tensorboard'))
-    if args.distributed:
-        dist.init_process_group(backend=args.dist_backend,\
-                init_method=args.dist_url, world_size=args.world_size)
-
-    model = models.__dict__[args.arch](
-        num_classes=dataset.classes, 
-        pretrained=args.pretrained
-    ) 
 
     input_data = torch.autograd.Variable(
         torch.Tensor(1, dataset.channel, dataset.shape, dataset.shape),
         requires_grad=True
     )
-    writer.add_graph(model, (input_data, ))
+    writer.add_graph(model, input_data)
 
     with open(os.path.join(args.logdir, 'network.txt'), 'w') as f:
         f.write('{}'.format(model))
@@ -160,7 +172,6 @@ def main():
 
     __normal__ = model.parameters()
 
-
     optimizer = torch.optim.SGD(
         [{'params': __normal__, 'name': 'normal'}],
         lr=args.lr, 
@@ -168,37 +179,15 @@ def main():
         weight_decay=args.weight_decay
     )
     
-    if not args.distributed:
-        if args.arch.startswith('alexnet') or args.arch.startswith('vgg'):
-            model.features = torch.nn.DataParallel(model.features)
-            model.cuda()
-        else:
-            model = torch.nn.DataParallel(model).cuda()
-    else:
-        model.cuda()
-        model = torch.nn.parallel.DistributedDataParallel(model)
 
 
 
-    # optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
-            args.start_epoch = checkpoint['epoch']
-            best_prec1 = checkpoint['best_prec1']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
-
+    load_checkpoint(get_model)
     cudnn.benchmark = True
 
     # Data loading code
     traindir = os.path.join(args.data, 'train.zip')
-    valdir = os.path.join(args.data, 'val.zip')
+    valdir = os.path.join(args.data, 'train.zip')
     normalize = transforms.Normalize(dataset.mean, dataset.std)
 
     train_dataset = MyImageFolder(
@@ -211,18 +200,17 @@ def main():
         ]) + [transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
             normalize,
-        ]), data_cached=args.data_cached, num_workers=args.workers)
+        ]), data_cached=args.data_cached, num_workers=args.workers, allow_dic=train_dic)
 
-    if args.distributed:
-        train_sampler = torch.utils.data.distributed.\
-                DistributedSampler(train_dataset)
-    else:
-        train_sampler = None
+
+
+    with open(os.path.join(args.logdir, 'classes.json'), 'w') as f:
+        json.dump(train_dataset.classes, f)
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset, batch_size=args.batch_size,
-        shuffle=(train_sampler is None),
-        num_workers=args.workers, pin_memory=True, sampler=train_sampler
+        shuffle=True,
+        num_workers=args.workers, pin_memory=True,
     )
 
     val_loader = torch.utils.data.DataLoader(
@@ -231,11 +219,12 @@ def main():
             transforms.CenterCrop(dataset.shape),
             transforms.ToTensor(),
             normalize,
-        ]), data_cached=args.data_cached, num_workers=args.workers),
+        ]), data_cached=args.data_cached, num_workers=args.workers, allow_dic=val_dic),
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
 
+    model.cuda()
 
     if args.evaluate:
         validate(val_loader, model, criterion)
@@ -245,13 +234,11 @@ def main():
     print('[LOG] ready, GO!')
     cnt = args.start_epoch * len(train_loader)
     for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
-            train_sampler.set_epoch(epoch)
         adjust_learning_rate(optimizer, epoch)
 
         # train for one epoch
         train(train_loader, model, criterion, optimizer, epoch)
-
+        
         # evaluate on validation set
         prec1 = validate(val_loader, model, criterion)
 
@@ -260,6 +247,8 @@ def main():
                 or epoch == 0:
             is_best = prec1 > best_prec1
             best_prec1 = max(prec1, best_prec1)
+            best_prec1 = 0
+            is_best = False
             save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': args.arch,
@@ -288,8 +277,8 @@ def train(train_loader, model, criterion, optimizer, epoch):
         # measure data loading time
         data_time.update(time.time() - end)
 
-        input = torch.autograd.Variable(input.cuda())
-        target = torch.autograd.Variable(target.cuda())
+        input = input.cuda()
+        target = target.cuda()
 
         # compute output
 
@@ -409,7 +398,7 @@ def adjust_learning_rate(optimizer, epoch):
     """
     Sets the learning rate to the initial LR decayed by 10 every 30 epochs
     """
-    lr = args.lr * (0.1 ** (epoch // 30))
+    lr = args.lr * (0.1 ** (epoch // 20))
 
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
@@ -424,7 +413,6 @@ def accuracy(output, target, topk=(1,)):
         _, pred = output.topk(maxk, 1, True, True)
         pred = pred.t()
         correct = pred.eq(target.view(1, -1).expand_as(pred))
-
         res = []
         for k in topk:
             correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)

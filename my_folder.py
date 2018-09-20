@@ -1,6 +1,7 @@
 import torch.utils.data as data
 import zipfile, pickle
 from PIL import Image
+from IPython import embed
 
 import os
 
@@ -19,10 +20,12 @@ def find_classes(zf):
     class_to_idx = {classes[i]: i for i in range(len(classes))}
     return classes, class_to_idx
 
-def make_dataset(zf, class_to_idx, extensions):
+def make_dataset(zf, class_to_idx, extensions, dic):
     images = []
     for each in zf.filelist:
         fn = each.filename
+        if dic and fn not in dic:
+            continue
         if has_file_allowed_extension(fn, extensions):
             item = (fn, class_to_idx[fn.split('/')[-2]])
             images.append(item)
@@ -31,7 +34,7 @@ def make_dataset(zf, class_to_idx, extensions):
 class ZipDatasetFolder(data.Dataset):
     def __init__(self, root, loader, extensions, transform=None,\
             target_transform=None, data_cached=False, use_cache=None,\
-            num_workers=0):
+            num_workers=0, allow_dic=None):
         self.num_workers = num_workers
         print('[LOG] preparing data folder')
         
@@ -48,7 +51,7 @@ class ZipDatasetFolder(data.Dataset):
                 classes, class_to_idx, samples = pickle.load(f)
         else:
             classes, class_to_idx = find_classes(self.zip)
-            samples = make_dataset(self.zip, class_to_idx, extensions)
+            samples = make_dataset(self.zip, class_to_idx, extensions, dic=allow_dic)
             if use_cache:
                 with open(use_cache, 'wb') as f:
                     pickle.dump([classes, class_to_idx, samples], f)
