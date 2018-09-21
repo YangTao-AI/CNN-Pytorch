@@ -5,7 +5,7 @@ class Data_config(object):
         self.std = std
         if mean[0] > 1:
             self.mean = [a / 255 for a in mean]
-            self.std = [a / 254 for a in std]
+            self.std = [a / 255 for a in std]
         self.path = path
         self.classes = classes
         self.shape = shape
@@ -23,8 +23,8 @@ cub = Data_config(
 
 Al = Data_config(
     'Al', 12,
-    [90.46230316, 158.09841919, 158.75947571],
-    [60.16843796, 43.50852966, 45.99687958],
+    [108.24723816, 169.19256592, 161.6643219],
+    [65.68550873, 45.49485016, 48.18498611,],
     './data',
     224,
 )

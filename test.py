@@ -21,7 +21,7 @@ data = MyImageFolder(
 
 model = main(get_model=True).cuda()
 
-f = open('./result1.txt', 'w')
+f = open('./resnet50.txt', 'w')
 batch_size = 64
 for i in range(0, len(data), batch_size):
     k = min(i + batch_size, len(data))

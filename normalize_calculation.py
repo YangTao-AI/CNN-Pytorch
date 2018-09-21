@@ -24,5 +24,13 @@ ae2 /= len(train)
 
 ie /= num
 ie2 /= num
+
+
+ae = ae
+ae2 = ae2
+ie = ie
+ie2 = ie2
+
+
 print('Macro average:', ae, 'std:', np.sqrt(np.abs(ae**2 - ae2)))
 print('Micro average:', ie, 'std:', np.sqrt(np.abs(ie**2 - ie2)))

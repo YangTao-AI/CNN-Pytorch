@@ -66,7 +66,7 @@ class ZipDatasetFolder(data.Dataset):
 
         self.transform = transform
         self.target_transform = target_transform
-        print('[SUC] data folder')
+        print('[SUC] data folder #%d' % self.__len__())
 
     def __del__(self):
         self.zip.close()

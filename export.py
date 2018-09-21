@@ -1,12 +1,12 @@
 import json, re, csv
 from IPython import embed
 
-path = './train_log/resnet18,pretrained,lr:0.01,wd:0.0005:Al/classes.json'
+path = 'train_log/resnet18,pretrained,lr:0.01,wd:0.01:Al/classes.json'
 with open(path, 'r') as f:
     classes = json.load(f)
 
 
-with open('result.txt') as f:
+with open('resnet50.txt') as f:
     content = f.readlines()
 mp = {
     '正常':         'norm',
@@ -22,19 +22,20 @@ mp = {
     '脏点':         'defect10',
     '其他':         'defect11',
 }
-pat = re.compile('.*/([0-9]*)\.jpg ([0-9]*).*?', re.S)
+pat = re.compile('.*/([0-9]*\.jpg) ([0-9]*).*?', re.S)
 
-out = open('result.csv', 'w')
-writer = csv.writer(out, dialect='excel')
+out = open('resnet50.csv', 'w')
+writer = csv.writer(out)
 t = []
 for each in content:
     data = pat.findall(each)
-    x = int(data[0][0])
+    x = data[0][0]
+    i = int(x.split('.')[0])
     y = int(data[0][1])
-    z = [x, mp[classes[y]]]
+    z = [i, x, mp[classes[y]]]
     t.append(z)
 
 t.sort(key = lambda x: x[0])
 for z in t:
-    writer.writerow(z)
+    writer.writerow(z[1:])
     

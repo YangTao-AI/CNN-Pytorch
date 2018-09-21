@@ -370,7 +370,6 @@ def resnext50(pretrained=False, **kwargs):
     model = Resnext_50_32x4d(**kwargs)
     if pretrained:
         checkpoint = torch.load('pretrained/resnext_50_32x4d.pth')
-        from IPython import embed
         model.load_state_dict(checkpoint)
     return model
 

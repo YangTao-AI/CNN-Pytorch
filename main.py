@@ -247,15 +247,13 @@ def main(get_model=False):
                 or epoch == 0:
             is_best = prec1 > best_prec1
             best_prec1 = max(prec1, best_prec1)
-            best_prec1 = 0
-            is_best = False
             save_checkpoint({
                 'epoch': epoch + 1,
                 'arch': args.arch,
                 'state_dict': model.state_dict(),
                 'best_prec1': best_prec1,
                 'optimizer' : optimizer.state_dict(),
-            }, is_best)
+            }, is_best, filename='epoch_%06d.pth,tar' % epoch)
 
     writer.close()
 
@@ -270,7 +268,6 @@ def train(train_loader, model, criterion, optimizer, epoch):
 
     # switch to train mode
     model.train()
-
     
     end = time.time()
     for i, (input, target) in enumerate(train_loader):
@@ -398,7 +395,7 @@ def adjust_learning_rate(optimizer, epoch):
     """
     Sets the learning rate to the initial LR decayed by 10 every 30 epochs
     """
-    lr = args.lr * (0.1 ** (epoch // 20))
+    lr = args.lr * (0.1 ** (epoch // 30))
 
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
