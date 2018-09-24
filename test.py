@@ -20,9 +20,8 @@ data = MyImageFolder(
 )
 
 model = main(get_model=True).cuda()
-
-f = open('./resnet50.txt', 'w')
-batch_size = 64
+f = open('./desnet121_0.0005_0.01.txt', 'w')
+batch_size = 16
 for i in range(0, len(data), batch_size):
     k = min(i + batch_size, len(data))
     _input = torch.cat([

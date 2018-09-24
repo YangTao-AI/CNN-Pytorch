@@ -6,7 +6,8 @@ with open(path, 'r') as f:
     classes = json.load(f)
 
 
-with open('resnet50.txt') as f:
+name = 'densenet201_0.0005_0.01'
+with open(name + '.txt') as f:
     content = f.readlines()
 mp = {
     '正常':         'norm',
@@ -24,7 +25,7 @@ mp = {
 }
 pat = re.compile('.*/([0-9]*\.jpg) ([0-9]*).*?', re.S)
 
-out = open('resnet50.csv', 'w')
+out = open(name + '.csv', 'w')
 writer = csv.writer(out)
 t = []
 for each in content:
