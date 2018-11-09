@@ -82,7 +82,7 @@ class Dataset(object):# {{{
             data_cached=True,
             num_workers=args.workers,
         )
-        self.classes = train_self.classes
+        self.classes = train_dataset.classes
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=args.batch_size,
@@ -215,7 +215,7 @@ class Network(object):
 
         with open(os.path.join(args.logdir, 'args.json'), 'w') as f:
             json.dump({'args': args.__dict__,\
-                    'other_parameters': self.other_parameters,\
+                    'other_parameters': other,\
                     'classes': self.dataset.classes}, f)
         with open(os.path.join(args.logdir, 'network.txt'), 'w') as f:
             f.write('{}'.format(self.model))
