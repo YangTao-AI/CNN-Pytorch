@@ -20,11 +20,11 @@ def find_classes(zf):
     class_to_idx = {classes[i]: i for i in range(len(classes))}
     return classes, class_to_idx
 
-def make_dataset(zf, class_to_idx, extensions, dic):
+def make_dataset(zf, class_to_idx, extensions, allow_dict):
     images = []
     for each in zf.filelist:
         fn = each.filename
-        if dic and fn not in dic:
+        if allow_dict and fn not in allow_dict:
             continue
         if has_file_allowed_extension(fn, extensions):
             item = (fn, class_to_idx[fn.split('/')[-2]])
@@ -34,7 +34,7 @@ def make_dataset(zf, class_to_idx, extensions, dic):
 class ZipDatasetFolder(data.Dataset):
     def __init__(self, root, loader, extensions, transform=None,\
             target_transform=None, data_cached=False, use_cache=None,\
-            num_workers=0, allow_dic=None):
+            num_workers=0, allow_dict=None):
         self.num_workers = num_workers
         cp.log('preparing data folder')
         
@@ -45,13 +45,14 @@ class ZipDatasetFolder(data.Dataset):
         if root[-4:] != '.zip':
             root += '.zip'
         self.zip = zipfile.ZipFile(root) 
-        
+        if isinstance(allow_dict, list):
+            allow_dict = set(allow_dict)
         if use_cache and os.path.isfile(use_cache):
             with open(use_cache, 'rb') as f:
                 classes, class_to_idx, samples = pickle.load(f)
         else:
             classes, class_to_idx = find_classes(self.zip)
-            samples = make_dataset(self.zip, class_to_idx, extensions, dic=allow_dic)
+            samples = make_dataset(self.zip, class_to_idx, extensions, allow_dict)
             if use_cache:
                 with open(use_cache, 'wb') as f:
                     pickle.dump([classes, class_to_idx, samples], f)

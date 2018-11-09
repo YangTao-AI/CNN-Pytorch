@@ -18,8 +18,8 @@ cub = DatasetConfig(
     'CUB-200-2011', 200, 
     [0.4856077, 0.49941534, 0.43237692],
     [0.23222743, 0.2277201, 0.26586822],
-    './data/train.zip',
-    './data/val.zip',
+    './data/images.zip',
+    './data/images.zip',
     (224, 224),
 )
 

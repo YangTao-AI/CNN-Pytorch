@@ -29,6 +29,9 @@ class ArgsConfig(object):
         parser.add_argument('--epochs', metavar='',\
                 default=90, type=int,\
                 help='number of total epochs to run (default: 90)')
+        parser.add_argument('--start-epoch', metavar='',\
+                default=0, type=int,\
+                help='start epoch (default: 0)')
         parser.add_argument('--lr', metavar='',\
                 default=0.01, type=float,\
                 help='initial learning rate (default: 0.01)')
@@ -62,6 +65,8 @@ class ArgsConfig(object):
 
     def commom_args(self):
         for parser in self.subparsers.choices.values():
+            parser.add_argument('--seed', metavar='',\
+                    default=233, type=int)
             parser.add_argument('-a', '--arch', metavar='',\
                     default='resnet18', choices=self._model_names,\
                     help='{}: {} (default: resnet18)'.format(\

@@ -1,11 +1,11 @@
 # @import: {{{
 # @commom
-import argparse, os, shutil, json, pickle, time
+import argparse, os, shutil, json, pickle, time, random
 import numpy as np
 from IPython import embed
 
 # @pytorch
-import torch, json
+import torch
 import torch.nn as nn
 import torch.nn.parallel
 import torch.backends.cudnn as cudnn
@@ -26,39 +26,65 @@ from dataset_config import *
 from my_folder import MyImageFolder
 
 # }}}
-
-use_torchvision = True
-#@ model list {{{
-if use_torchvision:
-    import torchvision.models as models
-else:
-    import networks as models
-model_names = sorted(name for name in models.__dict__\
-        if name.islower() and not name.startswith("__")\
-        and callable(models.__dict__[name]))
-# }}}
-
-
-args = ArgsConfig(model_names).args
-dataset_cfg = cub
-
+with torch.no_grad():
+    pass
 
 class Dataset(object):# {{{
     def __init__(self, dataset):
         self.__dict__.update(dataset.__dict__)
+        self.train_val = {'train': None, 'val': None}
+        if os.path.realpath(dataset.train_path) == os.path.realpath(dataset.val_path):
+            self.get_train_val_split()
+
+    def train_val_split(self, rate=0.88):
+        dataset = MyImageFolder(
+            self.train_path
+        )
+        samples = dataset.samples
+        np.random.shuffle(samples)
+        n = len(samples)
+        m = int(n*rate)
+        split = {'train': [name for name, label in samples[:m]],\
+                'val': [name for name, label in samples[m:]]}
+        return split
+
+    def get_train_val_split(self):
+        intermediate = 'intermediate'
+        if file_stat(intermediate) == None:
+            os.path.makedirs(intermediate)
+        train_val_split_path = os.path.join(intermediate,\
+                '{}_train_val_split.json'.format(self.name))
+
+        if os.path.isfile(train_val_split_path):
+            cp.wrn('training set is the same as validation set,\n'+\
+                    '      use \'(#y){}(#)\' divide dataset'.format(train_val_split_path))
+            with open(train_val_split_path, 'r') as f:
+                self.train_val = json.load(f)
+            cp.suc('\'(#y){}(#)\' loaded'.format(train_val_split_path), cp.done)
+        else:
+            cp.wrn('training set is the same as validation set,\n'+\
+                    '      generating \'(#y){}(#)\''.format(train_val_split_path))
+            self.train_val = self.train_val_split()
+
+            with open(train_val_split_path, 'w') as f:
+                json.dump(self.train_val, f)
+            cp.suc('\'(#y){}(#)\' saved'.format(train_val_split_path), cp.done)
 
     def get_train(self, args):
         normalize = transforms.Normalize(dataset.mean, dataset.std)
         train_dataset = MyImageFolder(
             self.train_path,
             transforms.Compose([
-                transforms.RandomResizedCrop(self.shape),
+                transforms.RandomResizedCrop(max(self.shape)),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize(dataset.mean, dataset.std)
             ]),
+            allow_dict=self.train_val['train'],
+            data_cached=True,
             num_workers=args.workers,
         )
+        self.classes = train_dataset.classes
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=args.batch_size,
@@ -72,11 +98,13 @@ class Dataset(object):# {{{
         val_dataset = MyImageFolder(
             self.val_path,
             transforms.Compose([
-                transforms.Resize(self.shape),
+                transforms.Resize(max(self.shape)),
                 transforms.CenterCrop(self.shape),
                 transforms.ToTensor(),
                 transforms.Normalize(dataset.mean, dataset.std)
             ]),
+            allow_dict=self.train_val['val'],
+            data_cached=True,
             num_workers=args.workers,
         )
         val_loader = torch.utils.data.DataLoader(
@@ -88,42 +116,57 @@ class Dataset(object):# {{{
         )
         return val_loader
 # }}}
-dataset = Dataset(dataset_cfg)
 
 class Network(object):
     def __init__(self, args, dataset):# {{{
+        cp.log('(#y)RUNNING MODE(#): (#g){}(#)'.format(args.mode))
         cudnn.benchmark = True
         self.args = args
-        self.other_parameters = {
-            'use_torchvision': use_torchvision,
-            **dataset.__dict__,
-        }
         self.best_prec1 = 0
         self.cnt = 0
         self.dataset = dataset
-
-        cp.log('(#y)RUNNING MODE(#): (#g){}(#)'.format(args.mode))
+        self.writer = None
         
+        # @model & loss
         cp.log('init model')
         self.model = models.__dict__[args.arch](
             num_classes=dataset.classes,
-            pretrained=args.pretrained
+            pretrained=args.pretrained if args.mode == 'train' else False,
         )   
         self.loss = nn.CrossEntropyLoss()
         cp.suc('init model', cp.done)
+        #################
         
+        if args.cuda:
+            self.model = self.model.cuda()
+            self.loss = self.loss.cuda()
+       
         if self.args.mode == 'train':
             self.train()
+        if self.args.mode == 'val':
+            self.validate()
     # }}}
     def __del__(self):# {{{
-        if 'writer' in self.__dict__:
+        if self.writer is not None:
             self.writer.close()
     # }}}
     def train_prepare(self):# {{{
+        # @optimizer
+        __normal__ = self.model.parameters()
+        self.optimizer = torch.optim.SGD([{'params': __normal__, 'name': 'normal'}],
+            lr=args.lr, momentum=args.momentum, weight_decay=args.wd,
+        )
+        ################
+
+        self.load_checkpoint()
+        
+        # @dataset
         cp.log('prepare dataset')
         self.train_loader = self.dataset.get_train(self.args)
         self.val_loader = self.dataset.get_val(self.args)
         cp.suc('prepare dataset', cp.done)
+        ################
+
         # @train_log 
         cp.log('init train log')
         init_time = time.strftime("%Y%m%d_%H%M%S", time.localtime())
@@ -149,6 +192,7 @@ class Network(object):
             if not os.path.isdir(path):
                 os.makedirs(path)
         cp.suc('init train log', cp.done)
+        ################
 
         # @tensorboard 
         cp.log('init tensorboad & add graph')
@@ -157,32 +201,26 @@ class Network(object):
             torch.Tensor(1, self.dataset.channel, *self.dataset.shape),
             requires_grad=True,
         )
+        if self.args.cuda:
+            input_data = input_data.cuda()
         self.writer.add_graph(self.model, input_data)
+        ################
+
         cp.suc('init tensorboad & add graph', cp.done)
-        
         self.dump_info()
-
-        cp.log('init loss & optimizer')
-        self.loss_func = nn.CrossEntropyLoss()
-        __normal__ = self.model.parameters()
-        optimizer = torch.optim.SGD([{'params': __normal__, 'name': 'normal'}],
-            lr=args.lr, momentum=args.momentum, weight_decay=args.wd,
-        )
-        cp.suc('init loss & optimizer', cp.done)
-        self.load_checkpoint()
-
     # }}}
     def dump_info(self):# {{{
         args = self.args
+        other = dataset.__dict__.copy()
+        other.pop('train_val')
+        other['use_torchvision'] = use_torchvision
+
         with open(os.path.join(args.logdir, 'args.json'), 'w') as f:
-            json.dump(
-                {'args': args.__dict__, 'other_parameters': self.other_parameters},
-                f,
-            )
+            json.dump({'args': args.__dict__,\
+                    'other_parameters': self.other_parameters,\
+                    'classes': self.dataset.classes}, f)
         with open(os.path.join(args.logdir, 'network.txt'), 'w') as f:
             f.write('{}'.format(self.model))
-        with open(os.path.join(args.logdir, 'classes.json'), 'w') as f:
-            json.dump(train_dataset.classes, f)
     # }}}
     def load_checkpoint(self):# {{{
         if self.args.resume is not None:
@@ -195,18 +233,30 @@ class Network(object):
                 self.best_prec1 = checkpoint.get('best_prec1', 0)
 
                 self.model.load_state_dict(checkpoint['state_dict'])
-                cp.suc(
-                    'successfully loaded model (epoch (#g){}(#))'.format(self.args.start_epoch)
-                )
-                if self.train:
+                cp.suc('successfully loaded model (epoch (#g){}(#))'.format(
+                        self.args.start_epoch))
+                if self.args.mode == 'train':
                     self.optimizer.load_state_dict(checkpoint['optimizer'])
-                    cp.suc(
-                        'successfully loaded optimizer'
-                    )
+                    cp.suc('successfully loaded optimizer')
             else:
                 cp.err('no checkpoint found')
 
    # }}}
+    def accuracy(self, output, target, topk=(1,)):# {{{
+        """Computes the precision@k for the specified values of k"""
+        with torch.no_grad():
+            maxk = max(topk)
+            batch_size = target.size(0)
+
+            _, pred = output.topk(maxk, 1, True, True)
+            pred = pred.t()
+            correct = pred.eq(target.view(1, -1).expand_as(pred))
+            res = []
+            for k in topk:
+                correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
+                res.append(correct_k.mul_(100.0 / batch_size))
+            return res
+    # }}}
     def adjust_learning_rate(self, epoch):# {{{
         """
         Sets the learning rate to the initial LR decayed by 10 every 30 epochs
@@ -219,43 +269,49 @@ class Network(object):
     def save_checkpoint(self, state, is_best, filename='checkpoint.pth.tar'):# {{{
         model_path = os.path.join(self.args.logdir, 'models')
         realpath = os.path.join(model_path, filename)
+        cp.log('(#g)#{}(#) saving to \'(#y){}(#)\''.format(
+                state['epoch'], realpath))
         torch.save(state, realpath)
         if not is_best:
             return
-        shutil.copyfile(realpath, os.path.join(model_path, 'model_best.pth.tar'))
+        best_model = os.path.join(model_path, 'model_best.pth.tar')
+        cp.log('best model saving to \'(#y){}(#)\''.format(best_model))
+        shutil.copyfile(realpath, best_model)
     # }}}
 
     def train(self):# {{{
         self.train_prepare()
         self.cnt = self.args.start_epoch * len(self.train_loader)
-        for epoch in range(args.start_epoch, args.epochs):
-            self.adjust_learning_rate(optimizer, epoch)
-
+        cp.log('(#y)'+'-'*64)
+        cp.log('start training at (#b)epoch(##): (#y){}(##) (#b)iter(##): (#y){}(##)'\
+                .format(self.args.start_epoch, self.cnt))
+        for epoch in range(self.args.start_epoch, self.args.epochs):
+            self.adjust_learning_rate(epoch)
             self.train_one(epoch)
-            
             # evaluate on validation set
             if (epoch + 1) % self.args.val_freq == 0:
                 prec1 = self.validate_one(epoch)
                 is_best = prec1 > self.best_prec1
                 self.best_prec1 = max(prec1, self.best_prec1)
-                save_checkpoint({
+                self.save_checkpoint({
                         'epoch': epoch + 1,
-                        'arch': args.arch,
-                        'state_dict': model.state_dict(),
+                        'arch': self.args.arch,
+                        'state_dict': self.model.state_dict(),
                         'best_prec1': self.best_prec1,
-                        'optimizer' : optimizer.state_dict(),
-                    },
-                    is_best, 
-                    filename='epoch_%06d.pth,tar' % epoch
+                        'optimizer' : self.optimizer.state_dict(),
+                    }, is_best, filename='epoch_%06d.pth.tar' % epoch,
                 )
     # }}}
 
     def validate(self):# {{{
-        validate_one()
+        self.val_loader = self.dataset.get_val(self.args)
+        self.args.__dict__['print_freq'] = 1
+        self.load_checkpoint()
+        self.validate_one(self.args.start_epoch)
     # }}}
 
 
-    def train_one(self):# {{{
+    def train_one(self, epoch):# {{{
         batch_time = AverageMeter()
         data_time = AverageMeter()
         losses = AverageMeter()
@@ -280,7 +336,7 @@ class Network(object):
 
             self.cnt += 1
 
-            prec1, prec5 = accuracy(output, target, topk=(1, 5))
+            prec1, prec5 = self.accuracy(output, target, topk=(1, 5))
             losses.update(loss.item(), input.size(0))
             top1.update(prec1[0], input.size(0))
             top5.update(prec5[0], input.size(0))
@@ -288,26 +344,33 @@ class Network(object):
             self.writer.add_scalar('accuracy/train', prec1, self.cnt)
 
             # compute gradient and do SGD step
-            optimizer.zero_grad()
+            self.optimizer.zero_grad()
             loss.backward()
-            optimizer.step()
+            self.optimizer.step()
 
             # measure elapsed time
             batch_time.update(time.time() - end_time)
             end_time = time.time()
 
-            if i % args.print_freq == 0:
-                print('Epoch: [{0}][{1}/{2}]\t'
-                      'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                      'Data {data_time.val:.3f} ({data_time.avg:.3f})\t'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                      'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                      'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                       epoch, i, len(train_loader), batch_time=batch_time,
-                       data_time=data_time, loss=losses, top1=top1, top5=top5))
+            color = 'r' if data_time.val > batch_time.val * 0.5 else\
+                    ('y' if data_time.val > batch_time.val * 0.33 else 'g')
+            if i % args.print_freq == 0 or epoch == self.args.start_epoch and i < 20:
+                cp('(#b)[train](#) '
+                    '(#b)Epoch(#) [{0}][{1}/{2}] '
+                    '(#b)Time(#) {batch_time.val:.2f} ({batch_time.avg:.2f}) '
+                    '(#b)Data(#) (#{color}){data_time.val:.2f}(#) ((#{color}){data_time.avg:.2f}(#)) '
+                    '(#b)Loss(#) (#g){loss.val:.4f}(#) ((#g){loss.avg:.4f}(#)) '
+                    '(#b)Prec@1(#) (#g){top1.val:.2f}%(#) ((#g){top1.avg:.2f}%(#))'.format(
+                    epoch, i, len(train_loader), batch_time=batch_time,
+                    data_time=data_time, loss=losses, top1=top1, top5=top5, color=color))
+            if i == 10:
+                break
+
+        self.writer.add_scalar('loss@epoch/val', losses.avg, epoch)
+        self.writer.add_scalar('accuracy@epoch/val', top1.avg, epoch)
     # }}}
 
-    def validate_one(val_loader, model, criterion, epoch=None):# {{{
+    def validate_one(self, epoch=None):# {{{
         batch_time = AverageMeter()
         losses = AverageMeter()
         top1 = AverageMeter()
@@ -318,11 +381,11 @@ class Network(object):
 
         model.eval()
         with torch.no_grad():
-            end = time.time()
-            if self.args.cuda:
-                input = input.cuda()
-                target = target.cuda()
+            end_time = time.time()
             for i, (input, target) in enumerate(val_loader):
+                if self.args.cuda:
+                    input = input.cuda()
+                    target = target.cuda()
                 input = torch.autograd.Variable(input)
                 target = torch.autograd.Variable(target)
 
@@ -330,37 +393,62 @@ class Network(object):
 
                 output = model(input)
 
-                loss = criterion(output, target)
+                loss = self.loss(output, target)
 
                 # measure accuracy and record loss
-                prec1, prec5 = accuracy(output, target, topk=(1, 5))
+                prec1, prec5 = self.accuracy(output, target, topk=(1, 5))
                 losses.update(loss.item(), input.size(0))
                 top1.update(prec1[0], input.size(0))
                 top5.update(prec5[0], input.size(0))
 
 
                 # measure elapsed time
-                batch_time.update(time.time() - end)
-                end = time.time()
+                batch_time.update(time.time() - end_time)
+                end_time = time.time()
 
                 if i % self.args.print_freq == 0:
-                    print('Test: [{0}/{1}]\t'
-                          'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                          'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                          'Prec@1 {top1.val:.3f} ({top1.avg:.3f})\t'
-                          'Prec@5 {top5.val:.3f} ({top5.avg:.3f})'.format(
-                           i, len(val_loader), batch_time=batch_time, 
-                           loss=losses, top1=top1, top5=top5))
+                    cp('(#b)[val](#) '
+                        '(#b)Epoch(#) [{0}][{1}/{2}] '
+                        '(#b)Time(#) {batch_time.val:.2f} ({batch_time.avg:.2f}) '
+                        '(#b)Loss(#) (#g){loss.val:.4f}(#) ((#g){loss.avg:.4f}(#)) '
+                        '(#b)Prec@1(#) (#g){top1.val:.2f}%(#) ((#g){top1.avg:.2f}%(#)) '.format(
+                        epoch, i, len(val_loader), batch_time=batch_time,
+                        loss=losses, top1=top1, top5=top5))
 
-            print(' * Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f}'
-                  .format(top1=top1, top5=top5))
+            cp.log('(#y)Average Accuracy on Validation(#): (#g){top1.avg:.4f}%(#)'.format(top1=top1, top5=top5))
 
-            if epoch:
-                writer.add_scalar('loss/val@epoch', losses.avg, epoch)
-                writer.add_scalar('accuracy/val@epoch', top1.avg, epoch)
-            else:
-                writer.add_scalar('loss/val', losses.avg, cnt)
-                writer.add_scalar('accuracy/val', top1.avg, cnt)
+            if self.writer is not None:
+                self.writer.add_scalar('loss@epoch/val', losses.avg, epoch)
+                self.writer.add_scalar('accuracy@epoch/val', top1.avg, epoch)
 
         return top1.avg
     # }}}
+
+
+
+if __name__ == '__main__':
+    cp.log('(#y)'+'-'*64)
+    use_torchvision = True
+    #@ model list {{{
+    if use_torchvision:
+        import torchvision.models as models
+    else:
+        import networks as models
+    model_names = sorted(name for name in models.__dict__\
+            if name.islower() and not name.startswith("__")\
+            and callable(models.__dict__[name]))
+    # }}}
+
+
+    args = ArgsConfig(model_names).args
+    random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+
+
+    if not args.cuda and torch.cuda.is_available():
+        cp.wrn('run with (#g)--cuda(#) to use gpu')
+    dataset_cfg = cub
+
+    dataset = Dataset(dataset_cfg)
+    network = Network(args, dataset)
