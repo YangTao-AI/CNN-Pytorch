@@ -1,10 +1,4 @@
 data
-*nori*
-*csv
-.DS_Store
-._*
+pretrained
 __pycache__
-.*swp
 train_log
-tmp
-

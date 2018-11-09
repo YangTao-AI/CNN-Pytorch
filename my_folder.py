@@ -2,7 +2,7 @@ import torch.utils.data as data
 import zipfile, pickle
 from PIL import Image
 from IPython import embed
-
+from utils import cp
 import os
 
 """
@@ -36,7 +36,7 @@ class ZipDatasetFolder(data.Dataset):
             target_transform=None, data_cached=False, use_cache=None,\
             num_workers=0, allow_dic=None):
         self.num_workers = num_workers
-        print('[LOG] preparing data folder')
+        cp.log('preparing data folder')
         
         self.loader = loader if loader else self.default_loader
         self.root = root
@@ -59,14 +59,13 @@ class ZipDatasetFolder(data.Dataset):
         self.cache = [None for i in range(len(samples))]\
                 if data_cached else None
 
-        assert len(samples) > 0
         self.classes = classes
         self.class_to_idx = class_to_idx
         self.samples = samples
 
         self.transform = transform
         self.target_transform = target_transform
-        print('[SUC] data folder #%d' % self.__len__())
+        cp.suc('successfully loaded (#g){}(#)'.format(self.__len__()), cp.done)
 
     def __del__(self):
         self.zip.close()
