@@ -26,8 +26,6 @@ from dataset_config import *
 from my_folder import MyImageFolder
 
 # }}}
-with torch.no_grad():
-    pass
 
 class Dataset(object):# {{{
     def __init__(self, dataset):
@@ -71,20 +69,20 @@ class Dataset(object):# {{{
             cp.suc('\'(#y){}(#)\' saved'.format(train_val_split_path), cp.done)
 
     def get_train(self, args):
-        normalize = transforms.Normalize(dataset.mean, dataset.std)
+        normalize = transforms.Normalize(self.mean, self.std)
         train_dataset = MyImageFolder(
             self.train_path,
             transforms.Compose([
                 transforms.RandomResizedCrop(max(self.shape)),
                 transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
-                transforms.Normalize(dataset.mean, dataset.std)
+                transforms.Normalize(self.mean, self.std)
             ]),
             allow_dict=self.train_val['train'],
             data_cached=True,
             num_workers=args.workers,
         )
-        self.classes = train_dataset.classes
+        self.classes = train_self.classes
         train_loader = torch.utils.data.DataLoader(
             train_dataset,
             batch_size=args.batch_size,
@@ -101,7 +99,7 @@ class Dataset(object):# {{{
                 transforms.Resize(max(self.shape)),
                 transforms.CenterCrop(self.shape),
                 transforms.ToTensor(),
-                transforms.Normalize(dataset.mean, dataset.std)
+                transforms.Normalize(self.mean, self.std)
             ]),
             allow_dict=self.train_val['val'],
             data_cached=True,
@@ -278,7 +276,6 @@ class Network(object):
         cp.log('best model saving to \'(#y){}(#)\''.format(best_model))
         shutil.copyfile(realpath, best_model)
     # }}}
-
     def train(self):# {{{
         self.train_prepare()
         self.cnt = self.args.start_epoch * len(self.train_loader)
@@ -302,15 +299,12 @@ class Network(object):
                     }, is_best, filename='epoch_%06d.pth.tar' % epoch,
                 )
     # }}}
-
     def validate(self):# {{{
         self.val_loader = self.dataset.get_val(self.args)
         self.args.__dict__['print_freq'] = 1
         self.load_checkpoint()
         self.validate_one(self.args.start_epoch)
     # }}}
-
-
     def train_one(self, epoch):# {{{
         batch_time = AverageMeter()
         data_time = AverageMeter()
@@ -363,13 +357,10 @@ class Network(object):
                     '(#b)Prec@1(#) (#g){top1.val:.2f}%(#) ((#g){top1.avg:.2f}%(#))'.format(
                     epoch, i, len(train_loader), batch_time=batch_time,
                     data_time=data_time, loss=losses, top1=top1, top5=top5, color=color))
-            if i == 10:
-                break
 
         self.writer.add_scalar('loss@epoch/val', losses.avg, epoch)
         self.writer.add_scalar('accuracy@epoch/val', top1.avg, epoch)
     # }}}
-
     def validate_one(self, epoch=None):# {{{
         batch_time = AverageMeter()
         losses = AverageMeter()
@@ -449,6 +440,5 @@ if __name__ == '__main__':
     if not args.cuda and torch.cuda.is_available():
         cp.wrn('run with (#g)--cuda(#) to use gpu')
     dataset_cfg = cub
-
     dataset = Dataset(dataset_cfg)
     network = Network(args, dataset)
