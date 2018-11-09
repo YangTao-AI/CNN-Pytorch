@@ -136,7 +136,10 @@ class Network(object):
         #################
         
         if args.cuda:
-            self.model = self.model.cuda()
+            gpu = None if self.args.gpu is None else self.args.gpu.split(',')
+            self.model_cuda = self.model.cuda()
+            self.model = nn.DataParallel(self.model_cuda, self.args.gpu)
+
             self.loss = self.loss.cuda()
        
         if self.args.mode == 'train':
@@ -201,7 +204,8 @@ class Network(object):
         )
         if self.args.cuda:
             input_data = input_data.cuda()
-        self.writer.add_graph(self.model, input_data)
+        self.writer.add_graph(self.model_cuda, input_data)
+        self.model_cuda = None
         ################
 
         cp.suc('init tensorboad & add graph', cp.done)

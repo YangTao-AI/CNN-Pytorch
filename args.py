@@ -82,5 +82,6 @@ class ArgsConfig(object):
                     help='path of checkpoint (default: None)')
             parser.add_argument('--cuda', action='store_true',
                     help='use GPU')
+            parser.add_argument('--gpu', default=None, help='GPU ID')
 
 # }}}
