@@ -19,8 +19,8 @@ class ColorfulPrint(object):# {{{
         for color, value in self.colors.items():
             color_tag = '(#%s)'%color
             s_color_tag = '(#%s)'%color[0]
-            s = s.replace(color_tag, '\033[1;%d;m'%value).\
-                    replace(s_color_tag, '\033[1;%d;m'%value)
+            s = s.replace(color_tag, '\033[%dm'%value).\
+                    replace(s_color_tag, '\033[%dm'%value)
         if auto_end:
             s = s + '\033[0m'
         return s
@@ -88,3 +88,5 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
+if __name__ == '__main__':
+    cp('(#r)hi')
