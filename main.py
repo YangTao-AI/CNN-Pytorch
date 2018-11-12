@@ -362,8 +362,8 @@ class Network(object):
                     epoch, i, len(train_loader), batch_time=batch_time,
                     data_time=data_time, loss=losses, top1=top1, top5=top5, color=color))
 
-        self.writer.add_scalar('loss@epoch/val', losses.avg, epoch)
-        self.writer.add_scalar('accuracy@epoch/val', top1.avg, epoch)
+        self.writer.add_scalar('loss@epoch/train', losses.avg, epoch)
+        self.writer.add_scalar('accuracy@epoch/train', top1.avg, epoch)
     # }}}
     def validate_one(self, epoch=None):# {{{
         batch_time = AverageMeter()
