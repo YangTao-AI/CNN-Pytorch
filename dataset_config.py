@@ -32,5 +32,13 @@ Al = DatasetConfig(
     (224, 224),
 )
 
-
+cell = DatasetConfig(
+    'cell', 28,
+    [13.412561, 14.005106, 20.556196, 21.12364][:1]*3,
+    [28.57005, 39.854362, 38.198936, 38.192764][:1]*3,
+    '/home/haoyunchao/DATA/kaggle/human-protein-atlas-image-classification/data/train.zip',
+    '/home/haoyunchao/DATA/kaggle/human-protein-atlas-image-classification/data/train.zip',
+    (512, 512),
+    3,
+)
 

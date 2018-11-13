@@ -1,4 +1,4 @@
-import os
+import os, time, datetime
 class ColorfulPrint(object):# {{{
 
     """Docstring for ColorfulPrint. """
@@ -9,7 +9,6 @@ class ColorfulPrint(object):# {{{
             'black': 30, 'red': 31, 'green': 32, 'yellow': 33,
             'blue': 34, 'magenta': 35, 'cyan': 36, 'white': 37,
         }
-
         self.done = '(#g)done(#)'
 
     def trans(self, *args, auto_end=True):
@@ -25,24 +24,39 @@ class ColorfulPrint(object):# {{{
             s = s + '\033[0m'
         return s
 
-    def err(self, *args):
-        return self('(#r)[ERR](#)', *args)
+    def err(self, *args, **kwargs):
+        return self('(#r)[ERR](#)', *args, **kwargs)
 
-    def log(self, *args):
-        return self('(#blue)[LOG](#)', *args)
+    def log(self, *args, **kwargs):
+        return self('(#blue)[LOG](#)', *args, **kwargs)
 
-    def wrn(self, *args):
-        return self('(#y)[WRN](#)', *args)
+    def wrn(self, *args, **kwargs):
+        return self('(#y)[WRN](#)', *args, **kwargs)
 
-    def suc(self, *args):
-        return self('(#g)[SUC](#)', *args)
+    def suc(self, *args, **kwargs):
+        return self('(#g)[SUC](#)', *args, **kwargs)
 
-    def __call__(self, *args):
-        print(self.trans(*args))
+    def __call__(self, *args, **kwargs):
+        print(self.trans(*args), **kwargs)
 
 cp = ColorfulPrint()
-# }}}
+class procedure:
+    def __init__(self, msg, same_line=True):
+        self.msg = msg
+        self.time = time.time()
+        cp.log(msg, end='\r'if same_line else '\n')
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        cp.suc(self.msg, cp.done, 'time:(#b)', datetime.timedelta(seconds=time.time() - self.time))
+
+# with procedure('running epoch #1', True):
+#     time.sleep(5)
+#     pass
+
+# }}}
 
 def file_stat(path):
     if os.path.isdir(path):

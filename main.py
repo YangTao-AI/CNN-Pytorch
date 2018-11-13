@@ -44,6 +44,9 @@ class Dataset(object):# {{{
         m = int(n*rate)
         split = {'train': [name for name, label in samples[:m]],\
                 'val': [name for name, label in samples[m:]]}
+        cp.log(
+            '(#b)len(split["train"])(##): (#y){}(##), (#b)len(split["val"])(##): (#y){}(##)'.format(len(split['train']), len(split['val']))
+        )
         return split
 
     def get_train_val_split(self):
@@ -73,13 +76,13 @@ class Dataset(object):# {{{
         train_dataset = MyImageFolder(
             self.train_path,
             transforms.Compose([
-                transforms.RandomResizedCrop(max(self.shape)),
-                transforms.RandomHorizontalFlip(),
+                # transforms.RandomResizedCrop(max(self.shape)),
+                # transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize(self.mean, self.std)
             ]),
             allow_dict=self.train_val['train'],
-            data_cached=True,
+            data_cached=False,
             num_workers=args.workers,
         )
         self.classes = train_dataset.classes
@@ -96,13 +99,13 @@ class Dataset(object):# {{{
         val_dataset = MyImageFolder(
             self.val_path,
             transforms.Compose([
-                transforms.Resize(max(self.shape)),
-                transforms.CenterCrop(self.shape),
+                # transforms.Resize(max(self.shape)),
+                # transforms.CenterCrop(self.shape),
                 transforms.ToTensor(),
                 transforms.Normalize(self.mean, self.std)
             ]),
             allow_dict=self.train_val['val'],
-            data_cached=True,
+            data_cached=False,
             num_workers=args.workers,
         )
         val_loader = torch.utils.data.DataLoader(
@@ -126,21 +129,19 @@ class Network(object):
         self.writer = None
         
         # @model & loss
-        cp.log('init model')
-        self.model = models.__dict__[args.arch](
-            num_classes=dataset.classes,
-            pretrained=args.pretrained if args.mode == 'train' else False,
-        )   
-        self.loss = nn.CrossEntropyLoss()
-        cp.suc('init model', cp.done)
+        with procedure('init model'):
+            self.model = models.__dict__[args.arch](
+                num_classes=dataset.classes,
+                pretrained=args.pretrained if args.mode == 'train' else False,
+            )   
+            self.loss = nn.MultiLabelSoftMarginLoss()
         #################
         
         if args.cuda:
             gpu = None if self.args.gpu is None else self.args.gpu.split(',')
             self.model_cuda = self.model.cuda()
             self.model = nn.DataParallel(self.model_cuda, self.args.gpu)
-
-            self.loss = self.loss.cuda()
+            self.loss.cuda()
        
         if self.args.mode == 'train':
             self.train()
@@ -162,53 +163,50 @@ class Network(object):
         self.load_checkpoint()
         
         # @dataset
-        cp.log('prepare dataset')
-        self.train_loader = self.dataset.get_train(self.args)
-        self.val_loader = self.dataset.get_val(self.args)
-        cp.suc('prepare dataset', cp.done)
+        with procedure('prepare dataset'):
+            self.train_loader = self.dataset.get_train(self.args)
+            self.val_loader = self.dataset.get_val(self.args)
         ################
 
         # @train_log 
-        cp.log('init train log')
-        init_time = time.strftime("%Y%m%d_%H%M%S", time.localtime())
-        if args.logdir == 'train_log':
-            args.logdir = os.path.join(
-                'train_log',
-                '{},{},lr:{},wd:{}:{}'.format(
-                    args.arch,
-                    'pretrained' if args.pretrained else 'not-pretrained',
-                    args.lr, args.wd, init_time
+        with procedure('init train log'):
+            init_time = time.strftime("%Y%m%d_%H%M%S", time.localtime())
+            if args.logdir == 'train_log':
+                args.logdir = os.path.join(
+                    'train_log',
+                    '{},{},lr:{},wd:{}:{}'.format(
+                        args.arch,
+                        'pretrained' if args.pretrained else 'not-pretrained',
+                        args.lr, args.wd, init_time
+                    )
                 )
-            )
-            args.logdir = touchdir(args.logdir)
-        if file_stat(args.logdir) is None:
-            os.makedirs(args.logdir)
-        file_type = file_stat(args.logdir)
-        assert file_type == 'dir',\
-                cp.trans('(#r)[ERR](#) \'(#y){}(#)\' is (a) {}'.format(
-                    args.logdir, file_type))
+                args.logdir = touchdir(args.logdir)
+            if file_stat(args.logdir) is None:
+                os.makedirs(args.logdir)
+            file_type = file_stat(args.logdir)
+            assert file_type == 'dir',\
+                    cp.trans('(#r)[ERR](#) \'(#y){}(#)\' is (a) {}'.format(
+                        args.logdir, file_type))
 
-        for each in ['tensorboard', 'models']:
-            path = os.path.join(self.args.logdir, each)
-            if not os.path.isdir(path):
-                os.makedirs(path)
-        cp.suc('init train log', cp.done)
+            for each in ['tensorboard', 'models']:
+                path = os.path.join(self.args.logdir, each)
+                if not os.path.isdir(path):
+                    os.makedirs(path)
         ################
 
         # @tensorboard 
-        cp.log('init tensorboad & add graph')
-        self.writer = SummaryWriter(os.path.join(self.args.logdir, 'tensorboard'))
-        input_data = torch.autograd.Variable(
-            torch.Tensor(1, self.dataset.channel, *self.dataset.shape),
-            requires_grad=True,
-        )
-        if self.args.cuda:
-            input_data = input_data.cuda()
-        self.writer.add_graph(self.model_cuda, input_data)
-        self.model_cuda = None
-        ################
+        with procedure('init tensorboad & add graph'):
+            self.writer = SummaryWriter(os.path.join(self.args.logdir, 'tensorboard'))
+            input_data = torch.autograd.Variable(
+                torch.Tensor(1, self.dataset.channel, *self.dataset.shape),
+                requires_grad=True,
+            )
+            if self.args.cuda:
+                input_data = input_data.cuda()
+            self.writer.add_graph(self.model_cuda, input_data)
+            self.model_cuda = None
+            ################
 
-        cp.suc('init tensorboad & add graph', cp.done)
         self.dump_info()
     # }}}
     def dump_info(self):# {{{
@@ -244,20 +242,18 @@ class Network(object):
                 cp.err('no checkpoint found')
 
    # }}}
-    def accuracy(self, output, target, topk=(1,)):# {{{
+    def accuracy(self, output, target):# {{{
         """Computes the precision@k for the specified values of k"""
         with torch.no_grad():
-            maxk = max(topk)
-            batch_size = target.size(0)
+            t = np.array(target)
+            o = np.array(output)
+            
+            o[o>0.5] = 1
+            o[o != 1] = 0
+            acc = (o == t).mean(axis=1)
+            acc[acc<1] = 0
+            return acc.mean()
 
-            _, pred = output.topk(maxk, 1, True, True)
-            pred = pred.t()
-            correct = pred.eq(target.view(1, -1).expand_as(pred))
-            res = []
-            for k in topk:
-                correct_k = correct[:k].view(-1).float().sum(0, keepdim=True)
-                res.append(correct_k.mul_(100.0 / batch_size))
-            return res
     # }}}
     def adjust_learning_rate(self, epoch):# {{{
         """
@@ -314,7 +310,6 @@ class Network(object):
         data_time = AverageMeter()
         losses = AverageMeter()
         top1 = AverageMeter()
-        top5 = AverageMeter()
 
         train_loader = self.train_loader
         model = self.model
@@ -329,15 +324,16 @@ class Network(object):
                 target = target.cuda()
 
             output = model(input)
-
+    
+            # print(output, target)
+            # embed()
             loss = self.loss(output, target)
 
             self.cnt += 1
 
-            prec1, prec5 = self.accuracy(output, target, topk=(1, 5))
+            prec1 = self.accuracy(output, target)
             losses.update(loss.item(), input.size(0))
-            top1.update(prec1[0], input.size(0))
-            top5.update(prec5[0], input.size(0))
+            top1.update(prec1, input.size(0))
             self.writer.add_scalar('loss/train', loss, self.cnt)
             self.writer.add_scalar('accuracy/train', prec1, self.cnt)
 
@@ -358,9 +354,9 @@ class Network(object):
                     '(#b)Time(#) {batch_time.val:.2f} ({batch_time.avg:.2f}) '
                     '(#b)Data(#) (#{color}){data_time.val:.2f}(#) ((#{color}){data_time.avg:.2f}(#)) '
                     '(#b)Loss(#) (#g){loss.val:.4f}(#) ((#g){loss.avg:.4f}(#)) '
-                    '(#b)Prec@1(#) (#g){top1.val:.2f}%(#) ((#g){top1.avg:.2f}%(#))'.format(
+                    '(#b)Prec@1(#) (#g){top1.val:.2f}(#) ((#g){top1.avg:.2f}(#))'.format(
                     epoch, i, len(train_loader), batch_time=batch_time,
-                    data_time=data_time, loss=losses, top1=top1, top5=top5, color=color))
+                    data_time=data_time, loss=losses, top1=top1, color=color))
 
         self.writer.add_scalar('loss@epoch/train', losses.avg, epoch)
         self.writer.add_scalar('accuracy@epoch/train', top1.avg, epoch)
@@ -369,7 +365,6 @@ class Network(object):
         batch_time = AverageMeter()
         losses = AverageMeter()
         top1 = AverageMeter()
-        top5 = AverageMeter()
 
         model = self.model
         val_loader = self.val_loader
@@ -387,14 +382,12 @@ class Network(object):
                 # compute output
 
                 output = model(input)
-
                 loss = self.loss(output, target)
 
                 # measure accuracy and record loss
-                prec1, prec5 = self.accuracy(output, target, topk=(1, 5))
+                prec1 = self.accuracy(output, target)
                 losses.update(loss.item(), input.size(0))
-                top1.update(prec1[0], input.size(0))
-                top5.update(prec5[0], input.size(0))
+                top1.update(prec1, input.size(0))
 
 
                 # measure elapsed time
@@ -406,11 +399,11 @@ class Network(object):
                         '(#b)Epoch(#) [{0}][{1}/{2}] '
                         '(#b)Time(#) {batch_time.val:.2f} ({batch_time.avg:.2f}) '
                         '(#b)Loss(#) (#g){loss.val:.4f}(#) ((#g){loss.avg:.4f}(#)) '
-                        '(#b)Prec@1(#) (#g){top1.val:.2f}%(#) ((#g){top1.avg:.2f}%(#)) '.format(
+                        '(#b)Prec@1(#) (#g){top1.val:.2f}(#) ((#g){top1.avg:.2f}(#)) '.format(
                         epoch, i, len(val_loader), batch_time=batch_time,
-                        loss=losses, top1=top1, top5=top5))
+                        loss=losses, top1=top1))
 
-            cp.log('(#y)Average Accuracy on Validation(#): (#g){top1.avg:.4f}%(#)'.format(top1=top1, top5=top5))
+            cp.log('(#y)Average Accuracy on Validation(#): (#g){top1.avg:.4f}(#)'.format(top1=top1))
 
             if self.writer is not None:
                 self.writer.add_scalar('loss@epoch/val', losses.avg, epoch)
@@ -423,7 +416,7 @@ class Network(object):
 
 if __name__ == '__main__':
     cp.log('(#y)'+'-'*64)
-    use_torchvision = True
+    use_torchvision = False
     #@ model list {{{
     if use_torchvision:
         import torchvision.models as models
@@ -443,6 +436,6 @@ if __name__ == '__main__':
 
     if not args.cuda and torch.cuda.is_available():
         cp.wrn('run with (#g)--cuda(#) to use gpu')
-    dataset_cfg = cub
+    dataset_cfg = cell
     dataset = Dataset(dataset_cfg)
     network = Network(args, dataset)

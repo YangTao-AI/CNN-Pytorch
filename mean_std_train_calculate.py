@@ -5,14 +5,13 @@ from dataset_config import *
 from my_folder import *
 from utils import *
 
-dataset_cfg = cub
+dataset_cfg = cell
 dataset = Dataset(dataset_cfg)
-train_dataset = MyImageFolder(dataset.train_path)
-
+train_dataset = MyImageFolder(dataset.train_path, allow_dict=dataset.train_val['train'])
 
 pixels = 0
 macro_mean, macro_mean2, micro_mean, micro_mean2 =\
-        [np.zeros((3), dtype=np.float32) for i in range(4)]
+        [np.zeros((4), dtype=np.float32) for i in range(4)]
 
 n = len(train_dataset)
 for i, [img, label] in enumerate(train_dataset):

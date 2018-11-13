@@ -1,11 +1,9 @@
 import torch.utils.data as data
-import numpy as np
 import zipfile, pickle
 from PIL import Image
 from IPython import embed
 from utils import cp
-import os, csv
-import torchvision
+import os
 
 """
     According to torchvision/dataserts/folder.py
@@ -15,12 +13,31 @@ def has_file_allowed_extension(filename, extensions):
     filename_lower = filename.lower()
     return any(filename_lower.endswith(ext) for ext in extensions)
 
+def find_classes(zf):
+    classes = [d.filename.split('/')[-2] for d in zf.filelist\
+            if d.filename[-1] == '/' and len(d.filename.split('/')) == 3]
+    classes.sort()
+    class_to_idx = {classes[i]: i for i in range(len(classes))}
+    return classes, class_to_idx
+
+def make_dataset(zf, class_to_idx, extensions, allow_dict):
+    images = []
+    for each in zf.filelist:
+        fn = each.filename
+        if allow_dict and fn not in allow_dict:
+            continue
+        if has_file_allowed_extension(fn, extensions):
+            item = (fn, class_to_idx[fn.split('/')[-2]])
+            images.append(item)
+    return images
+
 class ZipDatasetFolder(data.Dataset):
     def __init__(self, root, loader, extensions, transform=None,\
             target_transform=None, data_cached=False, use_cache=None,\
             num_workers=0, allow_dict=None):
         self.num_workers = num_workers
         cp.log('preparing data folder')
+        
         self.loader = loader if loader else self.default_loader
         self.root = root
         self.extensions = extensions
@@ -28,40 +45,24 @@ class ZipDatasetFolder(data.Dataset):
         if root[-4:] != '.zip':
             root += '.zip'
         self.zip = zipfile.ZipFile(root) 
-
-        _map = {}
-
-        def make_hots(a):
-            x = np.zeros((28), dtype=np.float32)
-            x[a] = 1
-            return x
-
-        csv_path = root[:-root[::-1].find('.')] + 'csv'
-        if csv_path is not None:
-            with open(csv_path, newline='') as csvfile:
-                spamreader = csv.reader(csvfile, delimiter=',', quotechar='|')
-                for row in spamreader:
-                    if row[0] == 'Id':
-                        continue
-                    _map[row[0]] = make_hots(list(map(int, row[1].split(' '))))
-
-
-        num_classses = 28
-        classes = list(range(num_classses))
-
-
         if isinstance(allow_dict, list):
             allow_dict = set(allow_dict)
-
-        if allow_dict is not None:
-            self.samples = [[item, _map[item]] for item in _map.keys() if item in allow_dict]
+        if use_cache and os.path.isfile(use_cache):
+            with open(use_cache, 'rb') as f:
+                classes, class_to_idx, samples = pickle.load(f)
         else:
-            self.samples = [[item, _map[item]] for item in _map.keys()]
+            classes, class_to_idx = find_classes(self.zip)
+            samples = make_dataset(self.zip, class_to_idx, extensions, allow_dict)
+            if use_cache:
+                with open(use_cache, 'wb') as f:
+                    pickle.dump([classes, class_to_idx, samples], f)
                     
-        self.cache = [None for i in range(len(self.samples))]\
+        self.cache = [None for i in range(len(samples))]\
                 if data_cached else None
 
         self.classes = classes
+        self.class_to_idx = class_to_idx
+        self.samples = samples
 
         self.transform = transform
         self.target_transform = target_transform
@@ -114,14 +115,9 @@ class ZipDatasetFolder(data.Dataset):
     def default_loader(self, path):
         zf = zipfile.ZipFile(self.root)\
                 if self.num_workers > 1 else self.zip
-        imgs = []
-        for suffix in ['green', 'blue', 'red', 'yellow'][:1]:
-            _path = './data/train/{}_{}.png'.format(path, suffix)
-            with open(_path, 'rb') as f:
-                img = Image.open(f).convert('RGB')
-                imgs.append(np.array(img))
-        imgs = np.concatenate([img[:,:,:] for img in imgs], axis=2)
-        return imgs
+        with zf.open(path) as f:
+            img = Image.open(f).convert('RGB')
+        return img
 
 IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif']
 
