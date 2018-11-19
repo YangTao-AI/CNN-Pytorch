@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch
 import torch.utils.model_zoo as model_zoo
 
 __all__ = ['InceptionV4', 'inceptionv4']
@@ -226,7 +227,7 @@ class InceptionV4(nn.Module):
     def __init__(self, num_classes=1001):
         super(InceptionV4, self).__init__()
         self.features = nn.Sequential(
-            BasicConv2d(3, 32, kernel_size=3, stride=2),
+            BasicConv2d(4, 32, kernel_size=3, stride=2),
             BasicConv2d(32, 32, kernel_size=3, stride=1),
             BasicConv2d(32, 64, kernel_size=3, stride=1, padding=1),
             Mixed_3a(),
@@ -259,14 +260,14 @@ class InceptionV4(nn.Module):
         return x
 
 
-def inceptionv4(pretrained=False):
+def inceptionv4(num_classes, pretrained=False):
     r"""InceptionV4 model architecture from the
     `"Inception-v4, Inception-ResNet..." <https://arxiv.org/abs/1602.07261>`_ paper.
 
     Args:
         pretrained (bool): If True, returns a model pre-trained on ImageNet
     """
-    model = InceptionV4()
+    model = InceptionV4(num_classes)
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['inceptionv4']))
     return model

@@ -1,5 +1,3 @@
-# @import: {{{
-# @commom
 import argparse, os, shutil, json, pickle, time, random
 import numpy as np
 from IPython import embed
@@ -70,14 +68,13 @@ class Dataset(object):# {{{
             with open(train_val_split_path, 'w') as f:
                 json.dump(self.train_val, f)
             cp.suc('\'(#y){}(#)\' saved'.format(train_val_split_path), cp.done)
-
     def get_train(self, args):
         normalize = transforms.Normalize(self.mean, self.std)
         train_dataset = MyImageFolder(
             self.train_path,
             transforms.Compose([
-                # transforms.RandomResizedCrop(max(self.shape)),
-                # transforms.RandomHorizontalFlip(),
+                transforms.RandomResizedCrop(max(self.shape), scale=(0.9, 1.0)),
+                transforms.RandomHorizontalFlip(),
                 transforms.ToTensor(),
                 transforms.Normalize(self.mean, self.std)
             ]),
@@ -99,8 +96,8 @@ class Dataset(object):# {{{
         val_dataset = MyImageFolder(
             self.val_path,
             transforms.Compose([
-                # transforms.Resize(max(self.shape)),
-                # transforms.CenterCrop(self.shape),
+                transforms.Resize(max(self.shape)),
+                transforms.CenterCrop(self.shape),
                 transforms.ToTensor(),
                 transforms.Normalize(self.mean, self.std)
             ]),
@@ -116,6 +113,28 @@ class Dataset(object):# {{{
             pin_memory=True
         )
         return val_loader
+
+    def get_test(self, args):
+        test_dataset = MyImageFolder(
+            self.test_path,
+            transforms.Compose([
+                transforms.Resize(max(self.shape)),
+                transforms.CenterCrop(self.shape),
+                transforms.ToTensor(),
+                transforms.Normalize(self.mean, self.std)
+            ]),
+            data_cached=False,
+            num_workers=args.workers,
+        )
+        test_loader = torch.utils.data.DataLoader(
+            test_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=args.workers,
+            pin_memory=True
+        )
+        return test_loader
+
 # }}}
 
 class Network(object):
@@ -138,15 +157,18 @@ class Network(object):
         #################
         
         if args.cuda:
-            gpu = None if self.args.gpu is None else self.args.gpu.split(',')
-            self.model_cuda = self.model.cuda()
-            self.model = nn.DataParallel(self.model_cuda, self.args.gpu)
-            self.loss.cuda()
+            with procedure('turn on cuda'):
+                gpu = None if self.args.gpu is None else self.args.gpu.split(',')
+                self.model_cuda = self.model.cuda()
+                self.model = nn.DataParallel(self.model_cuda, self.args.gpu)
+                self.loss.cuda()
        
         if self.args.mode == 'train':
             self.train()
         if self.args.mode == 'val':
             self.validate()
+        if self.args.mode == 'test':
+            self.test()
     # }}}
     def __del__(self):# {{{
         if self.writer is not None:
@@ -205,7 +227,7 @@ class Network(object):
                 input_data = input_data.cuda()
             self.writer.add_graph(self.model_cuda, input_data)
             self.model_cuda = None
-            ################
+        ################
 
         self.dump_info()
     # }}}
@@ -225,19 +247,17 @@ class Network(object):
     def load_checkpoint(self):# {{{
         if self.args.resume is not None:
             if os.path.isfile(self.args.resume):
-                cp.log(
-                    'loading checkpoint from (#y)\'{}\'(#)'.format(self.args.resume)
-                )
-                checkpoint = torch.load(self.args.resume)
-                self.args.start_epoch = checkpoint.get('epoch', 0)
-                self.best_prec1 = checkpoint.get('best_prec1', 0)
+                with procedure('loading checkpoint from (#y)\'{}\'(#)'.format(self.args.resume)) as pp:
+                    checkpoint = torch.load(self.args.resume)
+                    self.args.start_epoch = checkpoint.get('epoch', 0)
+                    self.best_prec1 = checkpoint.get('best_prec1', 0)
 
-                self.model.load_state_dict(checkpoint['state_dict'])
-                cp.suc('successfully loaded model (epoch (#g){}(#))'.format(
-                        self.args.start_epoch))
-                if self.args.mode == 'train':
-                    self.optimizer.load_state_dict(checkpoint['optimizer'])
-                    cp.suc('successfully loaded optimizer')
+                    self.model.load_state_dict(checkpoint['state_dict'])
+
+                    pp.msg += ' (epoch (#g){}(#))'.format(self.args.start_epoch)
+                    if self.args.mode == 'train':
+                        self.optimizer.load_state_dict(checkpoint['optimizer'])
+                        pp.msg += ' (optimizer loaded)'
             else:
                 cp.err('no checkpoint found')
 
@@ -250,6 +270,7 @@ class Network(object):
             
             o[o>0.5] = 1
             o[o != 1] = 0
+
             acc = (o == t).mean(axis=1)
             acc[acc<1] = 0
             return acc.mean()
@@ -284,27 +305,54 @@ class Network(object):
                 .format(self.args.start_epoch, self.cnt))
         for epoch in range(self.args.start_epoch, self.args.epochs):
             self.adjust_learning_rate(epoch)
-            self.train_one(epoch)
+            with procedure('train epoch {}'.format(epoch)) as t:
+                self.train_one(epoch)
             # evaluate on validation set
             if (epoch + 1) % self.args.val_freq == 0:
-                prec1 = self.validate_one(epoch)
-                is_best = prec1 > self.best_prec1
-                self.best_prec1 = max(prec1, self.best_prec1)
-                self.save_checkpoint({
-                        'epoch': epoch + 1,
-                        'arch': self.args.arch,
-                        'state_dict': self.model.state_dict(),
-                        'best_prec1': self.best_prec1,
-                        'optimizer' : self.optimizer.state_dict(),
-                    }, is_best, filename='epoch_%06d.pth.tar' % epoch,
-                )
+                with procedure('val & save model') as t:
+                    prec1 = self.validate_one(epoch)
+                    is_best = prec1 > self.best_prec1
+                    self.best_prec1 = max(prec1, self.best_prec1)
+                    self.save_checkpoint({
+                            'epoch': epoch + 1,
+                            'arch': self.args.arch,
+                            'state_dict': self.model.state_dict(),
+                            'best_prec1': self.best_prec1,
+                            'optimizer' : self.optimizer.state_dict(),
+                        }, is_best, filename='epoch_%06d.pth.tar' % epoch,
+                    )
     # }}}
     def validate(self):# {{{
         self.val_loader = self.dataset.get_val(self.args)
         self.args.__dict__['print_freq'] = 1
         self.load_checkpoint()
-        self.validate_one(self.args.start_epoch)
+        store = []
+        self.validate_one(self.args.start_epoch, store)
+        with open('val.pkl', 'wb') as f:
+            pickle.dump(store, f)
     # }}}
+
+    def test(self):# {{{
+        self.test_loader = self.dataset.get_test(self.args)
+        self.load_checkpoint()
+
+        result = []
+        n = len(self.test_loader)
+        with torch.no_grad():
+            for i, [input, target] in enumerate(self.test_loader):
+                if self.args.cuda:
+                    input = input.cuda()
+                input = torch.autograd.Variable(input)
+                with procedure('running batch {}/{}'.format(i+1, n)):
+                    output = self.model(input)
+                res = np.array(output)
+                name = list(target)
+                for i in range(res.shape[0]):
+                    result.append([name[i], res[i]])
+
+        with open('result_{}.pkl'.format(time.strftime("%Y%m%d_%H%M%S", time.localtime())), 'wb') as f:
+            pickle.dump(result, f)
+
     def train_one(self, epoch):# {{{
         batch_time = AverageMeter()
         data_time = AverageMeter()
@@ -318,7 +366,7 @@ class Network(object):
         end_time = time.time()
         for i, (input, target) in enumerate(train_loader):
             data_time.update(time.time() - end_time)
-            
+    
             if self.args.cuda:
                 input = input.cuda()
                 target = target.cuda()
@@ -361,7 +409,7 @@ class Network(object):
         self.writer.add_scalar('loss@epoch/train', losses.avg, epoch)
         self.writer.add_scalar('accuracy@epoch/train', top1.avg, epoch)
     # }}}
-    def validate_one(self, epoch=None):# {{{
+    def validate_one(self, epoch=None, store=None):# {{{
         batch_time = AverageMeter()
         losses = AverageMeter()
         top1 = AverageMeter()
@@ -382,6 +430,9 @@ class Network(object):
                 # compute output
 
                 output = model(input)
+
+                if store is not None:
+                    store.append([np.array(output), np.array(target)])
                 loss = self.loss(output, target)
 
                 # measure accuracy and record loss

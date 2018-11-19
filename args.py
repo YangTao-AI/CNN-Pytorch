@@ -75,8 +75,8 @@ class ArgsConfig(object):
                     default=0, type=int,\
                     help='number of data loaders (default: 0)')
             parser.add_argument('-b', '--batch-size', metavar='',
-                    default=128, type=int,
-                    help='batch size (default: 128)')
+                    default=64, type=int,
+                    help='batch size (default: 64)')
             parser.add_argument('--resume', metavar='PATH',\
                     default=None, type=str, 
                     help='path of checkpoint (default: None)')

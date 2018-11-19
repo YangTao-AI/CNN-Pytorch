@@ -1,4 +1,6 @@
-import os, time, datetime
+import os, time, datetime, cv2
+import numpy as np
+
 class ColorfulPrint(object):# {{{
 
     """Docstring for ColorfulPrint. """
@@ -39,6 +41,34 @@ class ColorfulPrint(object):# {{{
     def __call__(self, *args, **kwargs):
         print(self.trans(*args), **kwargs)
 
+
+    def square(self, color=(0, 0, 0)):
+
+        def rgb(red, green, blue):
+            """
+            Calculate the palette index of a color in the 6x6x6 color cube.
+            The red, green and blue arguments may range from 0 to 5.
+            """
+            return 16 + (red * 36) + (green * 6) + blue
+        color = rgb(*[int(each / 256 * 6) for each in color])
+        return '\x1b[48;5;{}m  \x1b[0m'.format(color)
+
+
+    def print_img(self, img, width=100, height=100, clear=False):
+        if clear:
+            os.system('clear')
+        h, w = img.shape[:2]
+        rate = min(width/w, height/h)
+        img = cv2.resize(img, (int(rate * w), int(rate * h)))
+        h, w = img.shape[:2]
+        s = ''
+        for i in range(h):
+            for j in range(w):
+                s += cp.square(img[i, j])
+            s += '\n'
+        print(s)
+
+
 cp = ColorfulPrint()
 class procedure:
     def __init__(self, msg, same_line=True):
@@ -57,6 +87,7 @@ class procedure:
 #     pass
 
 # }}}
+
 
 def file_stat(path):
     if os.path.isdir(path):

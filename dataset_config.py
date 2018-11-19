@@ -1,5 +1,5 @@
 class DatasetConfig(object):
-    def __init__(self, name, classes, mean, std, train_path, val_path, shape, channel=3):
+    def __init__(self, name, classes, mean, std, train_path, val_path, shape, test_path = None):
         self.name = name
         self.mean = mean
         self.std = std
@@ -10,7 +10,8 @@ class DatasetConfig(object):
         self.val_path = val_path
         self.classes = classes
         self.shape = shape
-        self.channel = channel
+        self.channel = len(self.mean)
+        self.test_path = test_path
 
 
 
@@ -34,11 +35,11 @@ Al = DatasetConfig(
 
 cell = DatasetConfig(
     'cell', 28,
-    [13.412561, 14.005106, 20.556196, 21.12364][:1]*3,
-    [28.57005, 39.854362, 38.198936, 38.192764][:1]*3,
-    '/home/haoyunchao/DATA/kaggle/human-protein-atlas-image-classification/data/train.zip',
-    '/home/haoyunchao/DATA/kaggle/human-protein-atlas-image-classification/data/train.zip',
-    (512, 512),
-    3,
+    [13.412561, 14.005106, 20.556196, 21.12364],
+    [28.57005, 39.854362, 38.198936, 38.192764],
+    './data/train',
+    './data/train',
+    (448, 448),
+    './data/test',
 )
 

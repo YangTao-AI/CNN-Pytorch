@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch
 import math
 import torch.utils.model_zoo as model_zoo
 
@@ -98,7 +99,7 @@ class ResNet(nn.Module):
     def __init__(self, block, layers, num_classes=1000):
         self.inplanes = 64
         super(ResNet, self).__init__()
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
+        self.conv1 = nn.Conv2d(4, 64, kernel_size=7, stride=2, padding=3,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.relu = nn.ReLU(inplace=True)
@@ -185,7 +186,11 @@ def resnet50(pretrained=False, **kwargs):
     """
     model = ResNet(Bottleneck, [3, 4, 6, 3], **kwargs)
     if pretrained:
-        model.load_state_dict(model_zoo.load_url(model_urls['resnet50']))
+        data = model_zoo.load_url(model_urls['resnet50'])
+        model.load_state_dict(data)
+        t = data['conv1.weight']
+        x = torch.cat([t, t.mean(dim=1, keepdim=True)], dim=1)
+        model.conv1.load_state_dict({'weight': x})
     return model
 
 

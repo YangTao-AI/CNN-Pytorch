@@ -3,7 +3,7 @@ import numpy as np
 import zipfile, pickle
 from PIL import Image
 from IPython import embed
-from utils import cp
+from utils import *
 import os, csv
 import torchvision
 
@@ -15,60 +15,58 @@ def has_file_allowed_extension(filename, extensions):
     filename_lower = filename.lower()
     return any(filename_lower.endswith(ext) for ext in extensions)
 
-class ZipDatasetFolder(data.Dataset):
+class DatasetFolder(data.Dataset):
     def __init__(self, root, loader, extensions, transform=None,\
             target_transform=None, data_cached=False, use_cache=None,\
             num_workers=0, allow_dict=None):
         self.num_workers = num_workers
-        cp.log('preparing data folder')
-        self.loader = loader if loader else self.default_loader
-        self.root = root
-        self.extensions = extensions
-        self.data_cached = data_cached
-        if root[-4:] != '.zip':
-            root += '.zip'
-        self.zip = zipfile.ZipFile(root) 
+        with procedure('preparing data folder') as pp:
+            self.loader = loader if loader else self.default_loader
+            self.root = root
+            self.extensions = extensions
+            self.data_cached = data_cached
 
-        _map = {}
+            _map = {}
 
-        def make_hots(a):
-            x = np.zeros((28), dtype=np.float32)
-            x[a] = 1
-            return x
+            def make_hots(a):
+                x = np.zeros((28), dtype=np.float32)
+                x[a] = 1
+                return x
 
-        csv_path = root[:-root[::-1].find('.')] + 'csv'
-        if csv_path is not None:
-            with open(csv_path, newline='') as csvfile:
-                spamreader = csv.reader(csvfile, delimiter=',', quotechar='|')
-                for row in spamreader:
-                    if row[0] == 'Id':
-                        continue
-                    _map[row[0]] = make_hots(list(map(int, row[1].split(' '))))
-
-
-        num_classses = 28
-        classes = list(range(num_classses))
+            csv_path = root + '.csv'
+            if os.path.isfile(csv_path):
+                with open(csv_path, newline='') as csvfile:
+                    spamreader = csv.reader(csvfile, delimiter=',', quotechar='|')
+                    for row in spamreader:
+                        if row[0] == 'Id':
+                            continue
+                        _map[row[0]] = make_hots(list(map(int, row[1].split(' '))))
+            else:
+                files = os.listdir(root)
+                _map = {_f.split('_')[0]: _f.split('_')[0] for _f in files if _f.split('.')[-1] == 'png'}
 
 
-        if isinstance(allow_dict, list):
-            allow_dict = set(allow_dict)
 
-        if allow_dict is not None:
-            self.samples = [[item, _map[item]] for item in _map.keys() if item in allow_dict]
-        else:
-            self.samples = [[item, _map[item]] for item in _map.keys()]
-                    
-        self.cache = [None for i in range(len(self.samples))]\
-                if data_cached else None
+            num_classses = 28
+            classes = list(range(num_classses))
 
-        self.classes = classes
 
-        self.transform = transform
-        self.target_transform = target_transform
-        cp.suc('successfully loaded (#g){}(#)'.format(self.__len__()), cp.done)
+            if isinstance(allow_dict, list):
+                allow_dict = set(allow_dict)
 
-    def __del__(self):
-        self.zip.close()
+            if allow_dict is not None:
+                self.samples = [[item, _map[item]] for item in _map.keys() if item in allow_dict]
+            else:
+                self.samples = [[item, _map[item]] for item in _map.keys()]
+                        
+            self.cache = [None for i in range(len(self.samples))]\
+                    if data_cached else None
+
+            self.classes = classes
+
+            self.transform = transform
+            self.target_transform = target_transform
+            pp.msg += ' (#g){}(#)'.format(self.__len__())
 
     def __getitem__(self, index):
         """
@@ -112,20 +110,18 @@ class ZipDatasetFolder(data.Dataset):
         return fmt_str
 
     def default_loader(self, path):
-        zf = zipfile.ZipFile(self.root)\
-                if self.num_workers > 1 else self.zip
         imgs = []
-        for suffix in ['green', 'blue', 'red', 'yellow'][:1]:
-            _path = './data/train/{}_{}.png'.format(path, suffix)
+        for suffix in ['green', 'blue', 'red', 'yellow']:
+            _path = os.path.join(self.root, '{}_{}.png'.format(path, suffix))
             with open(_path, 'rb') as f:
                 img = Image.open(f).convert('RGB')
                 imgs.append(np.array(img))
-        imgs = np.concatenate([img[:,:,:] for img in imgs], axis=2)
-        return imgs
+        imgs = np.concatenate([img[:,:,:1] for img in imgs], axis=2)
+        return Image.fromarray(imgs)
 
 IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm', '.tif']
 
-class MyImageFolder(ZipDatasetFolder):
+class MyImageFolder(DatasetFolder):
     """
     Attributes:
         classes (list): List of the class names.
